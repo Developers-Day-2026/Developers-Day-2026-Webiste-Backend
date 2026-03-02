@@ -1,24 +1,27 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 //Enums
-enum AppRole {
+enum UserType {
   PARTICIPANT
   STAFF
-  ADMIN
-  TREASURER
+}
+
+/// Roles for STAFF members only (portal permissions / responsibilities)
+enum StaffRole {
+  SUPERADMIN
   PR
   GR
-  FOODFEST
+  FOOD
+  EXCOM
+  COMPETITIONS
 }
 
 enum RegistrationStatus {
@@ -47,8 +50,9 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique @db.VarChar(255)
   password  String?  @db.VarChar(255)
-  role      AppRole  @default(PARTICIPANT)
-  
+
+  type      UserType @default(PARTICIPANT)
+
   isActive  Boolean  @default(true)
   lastLogin DateTime?
 
@@ -57,15 +61,20 @@ model User {
 
   staffProfile      StaffProfile?
   participant       Participant?
+
   company           Company?
   foodStall         FoodStall?
   brandAmbassador   BrandAmbassador?
 
+  // attendances marked by this (staff) user
+  markedCompetitionAttendances CompetitionAttendance[] @relation("AttendanceMarkedBy")
+
   @@index([email])
-  @@index([role])
+  @@index([type])
 }
 
-//PARTICIPANTS (Global Human Profile)
+
+//PARTICIPANTS
 model Participant {
   id        String   @id @default(uuid())
   userId    String   @unique
@@ -80,12 +89,13 @@ model Participant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  teamMembers        TeamMember[]
-  competitionAttendances CompetitionAttendance[]
+  teamMembers              TeamMember[]
+  competitionAttendances   CompetitionAttendance[]
 
   @@index([cnic])
   @@index([email])
 }
+
 
 //Competitions
 model Competition {
@@ -116,6 +126,7 @@ model Competition {
   @@index([isActive])
 }
 
+
 //Teams (Registration Instance)
 model Team {
   id              String   @id @default(uuid())
@@ -143,7 +154,8 @@ model Team {
   @@index([referenceId])
 }
 
-//Team Members (Junction)
+
+//Team Members
 model TeamMember {
   id            String   @id @default(uuid())
   teamId        String
@@ -163,6 +175,7 @@ model TeamMember {
   @@index([participantId])
 }
 
+
 //attendance
 model CompetitionAttendance {
   id            String   @id @default(uuid())
@@ -174,36 +187,44 @@ model CompetitionAttendance {
 
   status        Boolean  @default(true)
   method        AttendanceMethod
-  markedBy      String?  @db.VarChar(100)
+
+  /// Replaces markedBy string with a real relation to the portal user (staff).
+  markedByUserId String?
+  markedByUser   User?    @relation("AttendanceMarkedBy", fields: [markedByUserId], references: [id], onDelete: SetNull)
+
   markedAt      DateTime @default(now())
-  
   notes         String?  @db.Text
 
   @@unique([teamId, participantId])
   @@index([teamId])
   @@index([participantId])
   @@index([markedAt])
+  @@index([markedByUserId])
 }
 
-// staff / admin profile 
+
+// staff / admin profile
 model StaffProfile {
   id          String   @id
   user        User     @relation(fields: [id], references: [id], onDelete: Cascade)
 
   fullName    String   @db.VarChar(100)
   nuId        String   @unique @db.VarChar(20)
-  role        AppRole  @default(STAFF)
+
+  staffRole   StaffRole
 
   isApproved  Boolean  @default(false)
   approvedAt  DateTime?
   assignedBooth String? @db.VarChar(50)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([nuId])
   @@index([isApproved])
+  @@index([staffRole])
 }
+
 
 //companies
 model Company {
@@ -219,12 +240,13 @@ model Company {
   website     String?  @db.VarChar(255)
   contactEmail String? @db.VarChar(255)
   contactPhone String? @db.VarChar(20)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([categoryId])
 }
+
 
 //food stalls
 model FoodStall {
@@ -243,6 +265,7 @@ model FoodStall {
   @@index([paymentStatus])
 }
 
+
 //brand ambassadors
 model BrandAmbassador {
   id        String   @id @default(uuid())
@@ -252,7 +275,7 @@ model BrandAmbassador {
   fullName  String   @db.VarChar(100)
   institute String   @db.VarChar(200)
   referralCode String @unique @db.VarChar(20)
-  
+
   totalReferrals Int @default(0)
 
   createdAt DateTime @default(now())
@@ -261,6 +284,7 @@ model BrandAmbassador {
   @@index([referralCode])
 }
 
+
 //categories
 model Category {
   id        String   @id @default(uuid())
@@ -268,10 +292,11 @@ model Category {
   description String? @db.Text
 
   companies Company[]
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
 
 //venue
 model Venue {
@@ -282,7 +307,7 @@ model Venue {
   facilities String? @db.Text
 
   competitions Competition[]
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

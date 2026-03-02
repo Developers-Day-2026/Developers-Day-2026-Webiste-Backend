@@ -12,6 +12,10 @@ connectDB();
 
 app.use(express.json());
 
+// Routes
+import authRoutes from "./routes/auth.routes";
+app.use("/auth", authRoutes);
+
 app.get("/", (_req: Request, res: Response) => {
   res.send("Express + TypeScript Server");
 });

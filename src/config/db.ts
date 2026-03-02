@@ -7,7 +7,7 @@ dotenv.config();
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.POOLED_DATABASE_URL || process.env.DATABASE_URL,
+      url: process.env.DIRECT_URL || process.env.DATABASE_URL,
     },
   },
 });
