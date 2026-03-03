@@ -44,6 +44,28 @@ enum PaymentMethod {
   CASH
 }
 
+/// Every discrete operation a portal user can perform.
+enum Action {
+  VIEW_REGISTRATION_DETAILS
+  VIEW_ALL_COMPETITIONS
+  EDIT_COMPETITION_TIME
+  VIEW_STALL_DETAILS
+  ADD_NEW_STALL
+  EDIT_STALL
+  DELETE_STALL
+  VIEW_ALL_COMPANIES
+  ADD_NEW_COMPANY
+  ASSIGN_BOOTH
+  EDIT_COMPANY
+  DELETE_COMPANY
+  CREATE_NEW_REGISTRATION
+  UPDATE_ATTENDANCE
+  VIEW_ALL_PORTAL_USERS
+  ASSIGN_ACTIONS_TO_USERS
+  CREATE_ACCOUNTS
+  UPDATE_PARTICIPANT_RECORD
+}
+
 
 // USER (Auth / System Identity)
 model User {
@@ -68,6 +90,11 @@ model User {
 
   // attendances marked by this (staff) user
   markedCompetitionAttendances CompetitionAttendance[] @relation("AttendanceMarkedBy")
+
+  // Extra actions granted to this user by a super-admin
+  grantedActions     UserAction[] @relation("UserGrantedActions")
+  // Actions this user has granted to others (as admin)
+  actionsGrantedByMe UserAction[] @relation("ActionGrantedBy")
 
   @@index([email])
   @@index([type])
@@ -310,4 +337,24 @@ model Venue {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+
+/// Extra actions granted to a staff user by a super-admin.
+/// Role-default actions are NOT stored here — they are derived at runtime.
+model UserAction {
+  id        String   @id @default(uuid())
+
+  userId    String
+  user      User     @relation("UserGrantedActions", fields: [userId], references: [id], onDelete: Cascade)
+
+  action    Action
+
+  grantedAt DateTime @default(now())
+
+  grantedBy     String?
+  grantedByUser User?  @relation("ActionGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, action])
+  @@index([userId])
 }

@@ -3,6 +3,7 @@ import { prisma } from '../config/db'
 import { supabaseAdmin, supabasePublic } from '../config/supabase'
 import { deriveNuId } from '../utils/nuId'
 import { StaffRole, UserType } from '@prisma/client'
+import { ROLE_DEFAULT_ACTIONS, actionsToKebab } from '../utils/actions'
 
 //for logout
 export async function logoutUser(req: Request, res: Response): Promise<void> {
@@ -45,10 +46,10 @@ export async function loginUser(req: Request, res: Response): Promise<void> {
 
     const { session, user: supabaseUser } = data
 
-    // fetch matching prisma User + StaffProfile
+    // fetch matching prisma User + StaffProfile + extra granted actions
     const prismaUser = await prisma.user.findUnique({
         where: { id: supabaseUser.id },
-        include: { staffProfile: true },
+        include: { staffProfile: true, grantedActions: true },
     })
 
     if (!prismaUser) {
@@ -75,7 +76,12 @@ export async function loginUser(req: Request, res: Response): Promise<void> {
         data: { lastLogin: new Date() },
     })
 
-    // return session tokens + profile
+    // Compute effective actions: role defaults ∪ extra grants
+    const roleDefaults = ROLE_DEFAULT_ACTIONS[prismaUser.staffProfile?.staffRole ?? ''] ?? []
+    const extraEnums   = prismaUser.grantedActions.map((a) => a.action)
+    const effective    = [...new Set([...roleDefaults, ...extraEnums])]
+
+    // return session tokens + profile + actions
     res.status(200).json({
         success: true,
         message: 'Login successful.',
@@ -91,6 +97,7 @@ export async function loginUser(req: Request, res: Response): Promise<void> {
                 fullName:   prismaUser.staffProfile?.fullName   ?? null,
                 staffRole:  prismaUser.staffProfile?.staffRole  ?? null,
                 isApproved: prismaUser.staffProfile?.isApproved ?? null,
+                actions:    actionsToKebab(effective),
             },
         },
     })
