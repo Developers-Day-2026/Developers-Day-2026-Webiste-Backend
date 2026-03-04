@@ -8,6 +8,8 @@ import {
     getRegistration,
     checkClashes,
     createRegistration,
+    searchTeams,
+    markTeamAttendance,
 } from '../controllers/registration.controller'
 
 const router = Router()
@@ -49,6 +51,22 @@ router.get(
     requireAuth,
     requireAction('VIEW_REGISTRATION_DETAILS'),
     listRegistrations
+)
+
+// GET /registrations/search?q=<query>
+router.get(
+    '/search',
+    requireAuth,
+    requireAction('UPDATE_ATTENDANCE'),
+    searchTeams
+)
+
+// POST /registrations/:teamId/mark-attendance
+router.post(
+    '/:teamId/mark-attendance',
+    requireAuth,
+    requireAction('UPDATE_ATTENDANCE'),
+    markTeamAttendance
 )
 
 // GET /registrations/:id

@@ -1,7 +1,7 @@
 import { Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { prisma } from '../config/db'
-import { Prisma, RegistrationStatus, PaymentMethod } from '@prisma/client'
+import { Prisma, RegistrationStatus, PaymentMethod, AttendanceMethod } from '@prisma/client'
 import { z } from 'zod'
 
 // GET /registrations/competitions 
@@ -382,5 +382,157 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
             competition: result.competition.name,
             memberCount: result._count.members,
         },
+    })
+}
+
+//  GET /registrations/search?q=<query>
+
+export async function searchTeams(req: AuthRequest, res: Response): Promise<void> {
+    const query = (req.query.q as string)?.trim() ?? ''
+
+    if (!query) {
+        res.json({ success: true, data: [] })
+        return
+    }
+
+    // Search by team ID, team name, or leader name
+    const teams = await prisma.team.findMany({
+        where: {
+            OR: [
+                { id:          { contains: query, mode: 'insensitive' } },
+                { name:        { contains: query, mode: 'insensitive' } },
+                { referenceId: { contains: query, mode: 'insensitive' } },
+                {
+                    members: {
+                        some: {
+                            isLeader: true,
+                            participant: {
+                                fullName: { contains: query, mode: 'insensitive' },
+                            },
+                        },
+                    },
+                },
+            ],
+        },
+        include: {
+            competition: {
+                select: { id: true, name: true, compDay: true },
+            },
+            members: {
+                where: { isLeader: true },
+                include: {
+                    participant: {
+                        select: { fullName: true, email: true },
+                    },
+                },
+                take: 1,
+            },
+            attendance: {
+                select: { participantId: true, status: true },
+            },
+            _count: { select: { members: true } },
+        },
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+    })
+
+    res.json({
+        success: true,
+        data: teams.map((t) => {
+            const totalMembers   = t._count.members
+            const markedPresent  = t.attendance.filter((a) => a.status).length
+            const attendanceMarked = totalMembers > 0 && markedPresent === totalMembers
+            return {
+                id:               t.id,
+                name:             t.name,
+                referenceId:      t.referenceId,
+                competition:      t.competition,
+                leader:           t.members[0]?.participant || null,
+                memberCount:      totalMembers,
+                attendanceMarked,
+                markedCount:      markedPresent,
+            }
+        }),
+    })
+}
+
+//  POST /registrations/:teamId/mark-attendance
+
+const markAttendanceSchema = z.object({
+    method: z.nativeEnum(AttendanceMethod),
+    notes:  z.string().optional(),
+})
+
+export async function markTeamAttendance(req: AuthRequest, res: Response): Promise<void> {
+    const teamId = String(req.params.teamId)
+
+    const parsed = markAttendanceSchema.safeParse(req.body)
+    if (!parsed.success) {
+        res.status(400).json({ success: false, errors: parsed.error.issues })
+        return
+    }
+
+    const { method, notes } = parsed.data
+
+    // Verify team exists
+    const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: {
+            members: { select: { participantId: true } },
+        },
+    })
+
+    if (!team) {
+        res.status(404).json({ success: false, message: 'Team not found.' })
+        return
+    }
+
+    if (team.members.length === 0) {
+        res.status(400).json({ success: false, message: 'Team has no members.' })
+        return
+    }
+
+    // Get the staff user ID from the request
+    const markedByUserId = req.userId || null
+
+    // Mark attendance for all team members
+    const result = await prisma.$transaction(async (tx) => {
+        // Upsert attendance for each team member
+        const attendanceRecords = await Promise.all(
+            team.members.map((m) =>
+                tx.competitionAttendance.upsert({
+                    where: {
+                        teamId_participantId: {
+                            teamId,
+                            participantId: m.participantId,
+                        },
+                    },
+                    update: {
+                        status:         true,
+                        method,
+                        markedByUserId,
+                        markedAt:       new Date(),
+                        notes:          notes || null,
+                    },
+                    create: {
+                        teamId,
+                        participantId:  m.participantId,
+                        status:         true,
+                        method,
+                        markedByUserId,
+                        markedAt:       new Date(),
+                        notes:          notes || null,
+                    },
+                })
+            )
+        )
+
+        return attendanceRecords
+    })
+
+    res.json({
+        success: true,
+        message: `Attendance marked for ${result.length} team member(s).`,
+        data: { markedCount: result.length },
     })
 }
