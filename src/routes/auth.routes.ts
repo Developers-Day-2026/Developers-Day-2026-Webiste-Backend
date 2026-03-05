@@ -16,7 +16,7 @@ const registerSchema = z
             ),
         password: z.string().min(8, 'Password must be at least 8 characters'),
         confirmPassword: z.string().min(1, 'Please confirm your password'),
-        role: z.enum(['excom', 'pr', 'gr', 'food', 'cs', 'superadmin'], {
+        role: z.enum(['excom', 'pr', 'gr', 'food', 'cs', 'superadmin', 'ambassador-management'], {
             error: 'Invalid role selected.',
         }),
     })

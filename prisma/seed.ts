@@ -16,12 +16,13 @@ const ids = {
     categories: ['cat-001', 'cat-002', 'cat-003', 'cat-004', 'cat-005'],
 
     staff: {
-        superadmin:   'staff-superadmin-001',
-        excom:        'staff-excom-001',
-        pr:           'staff-pr-001',
-        gr:           'staff-gr-001',
-        food:         'staff-food-001',
-        competitions: 'staff-comp-001',
+        superadmin:             'staff-superadmin-001',
+        excom:                  'staff-excom-001',
+        pr:                     'staff-pr-001',
+        gr:                     'staff-gr-001',
+        food:                   'staff-food-001',
+        competitions:           'staff-comp-001',
+        ambassadorManagement:   'staff-ambmgmt-001',
     },
 
     participantUsers: ['puser-001', 'puser-002', 'puser-003', 'puser-004', 'puser-005'],
@@ -120,6 +121,13 @@ async function main() {
             fullName: 'Ahmed Raza',
             nuId:   '23K-0006',
         },
+        {
+            userId: ids.staff.ambassadorManagement,
+            email:  'k230007@nu.edu.pk',
+            role:   StaffRole.AMBASSADOR_MANAGEMENT,
+            fullName: 'Nadia Farooq',
+            nuId:   '23K-0007',
+        },
     ]
 
     for (const s of staffData) {
@@ -213,27 +221,32 @@ async function main() {
 
     console.log('📣 Seeding brand ambassadors...')
 
+    // First 2 ambassadors share a User with participants (demonstrating multi-profile support)
     const baData = [
-        { userId: ids.baUsers[0], baId: ids.bas[0], fullName: 'Hamza Qureshi',   email: 'hamza.ba@gmail.com',   institute: 'University of Karachi', referralCode: 'HAMZA-DD26', referrals: 12 },
-        { userId: ids.baUsers[1], baId: ids.bas[1], fullName: 'Mahnoor Iqbal',   email: 'mahnoor.ba@gmail.com', institute: 'Bahria University',     referralCode: 'MAHNR-DD26', referrals: 8  },
-        { userId: ids.baUsers[2], baId: ids.bas[2], fullName: 'Saad Farooqui',   email: 'saad.ba@gmail.com',    institute: 'Szabist',               referralCode: 'SAADF-DD26', referrals: 15 },
-        { userId: ids.baUsers[3], baId: ids.bas[3], fullName: 'Noor Fatima',     email: 'noor.ba@gmail.com',    institute: 'Iqra University',       referralCode: 'NOORF-DD26', referrals: 5  },
-        { userId: ids.baUsers[4], baId: ids.bas[4], fullName: 'Arslan Sher',     email: 'arslan.ba@gmail.com',  institute: 'Sir Syed University',   referralCode: 'ARSLN-DD26', referrals: 20 },
+        // Ali Usman (puser-001) is also an ambassador — uses same userId
+        { userId: ids.participantUsers[0], baId: ids.bas[0], fullName: 'Ali Usman',       cnic: '4210112345671', email: 'ali.student@gmail.com',   institute: 'FAST NUCES Karachi',    referralCode: 'ALIUU-DD26', referrals: 12 },
+        // Hira Baig (puser-002) is also an ambassador — uses same userId
+        { userId: ids.participantUsers[1], baId: ids.bas[1], fullName: 'Hira Baig',       cnic: '4210112345672', email: 'hira.dev@outlook.com',    institute: 'NED University',        referralCode: 'HIRAB-DD26', referrals: 8  },
+        // Rest are standalone ambassador-only users
+        { userId: ids.baUsers[2],          baId: ids.bas[2], fullName: 'Saad Farooqui',   cnic: '4210112345683', email: 'saad.ba@gmail.com',       institute: 'Szabist',               referralCode: 'SAADF-DD26', referrals: 15 },
+        { userId: ids.baUsers[3],          baId: ids.bas[3], fullName: 'Noor Fatima',     cnic: '4210112345684', email: 'noor.ba@gmail.com',       institute: 'Iqra University',       referralCode: 'NOORF-DD26', referrals: 5  },
+        { userId: ids.baUsers[4],          baId: ids.bas[4], fullName: 'Arslan Sher',     cnic: '4210112345685', email: 'arslan.ba@gmail.com',     institute: 'Sir Syed University',   referralCode: 'ARSLN-DD26', referrals: 20 },
     ]
 
     for (const ba of baData) {
+        // Only create a new User if this userId doesn't already exist (shared users already created above)
         await prisma.user.upsert({
             where:  { id: ba.userId },
             create: { id: ba.userId, email: ba.email, type: UserType.PARTICIPANT, isActive: true },
-            update: { email: ba.email },
+            update: {},
         })
         await prisma.brandAmbassador.upsert({
             where:  { id: ba.baId },
-            create: { id: ba.baId, userId: ba.userId, fullName: ba.fullName, institute: ba.institute, referralCode: ba.referralCode, totalReferrals: ba.referrals },
-            update: { fullName: ba.fullName, institute: ba.institute, totalReferrals: ba.referrals },
+            create: { id: ba.baId, userId: ba.userId, fullName: ba.fullName, cnic: ba.cnic, institute: ba.institute, referralCode: ba.referralCode, totalReferrals: ba.referrals },
+            update: { fullName: ba.fullName, cnic: ba.cnic, institute: ba.institute, totalReferrals: ba.referrals },
         })
     }
-    console.log(`   ✓ ${baData.length} brand ambassadors\n`)
+    console.log(`   ✓ ${baData.length} brand ambassadors (2 shared with participants)\n`)
 
     console.log('🏆 Seeding competitions...')
 
@@ -357,7 +370,7 @@ async function main() {
     console.log('✅ Seed complete!\n')
     console.log('  Venues:              ', venueData.length)
     console.log('  Categories:          ', categoryData.length)
-    console.log('  Staff:               ', staffData.length, '  (roles: SUPERADMIN, EXCOM, PR, GR, FOOD, COMPETITIONS)')
+    console.log('  Staff:               ', staffData.length, '  (roles: SUPERADMIN, EXCOM, PR, GR, FOOD, COMPETITIONS, AMBASSADOR_MANAGEMENT)')
     console.log('  Participants:        ', participantData.length)
     console.log('  Companies:           ', companyData.length)
     console.log('  Food Stalls:         ', stallData.length)

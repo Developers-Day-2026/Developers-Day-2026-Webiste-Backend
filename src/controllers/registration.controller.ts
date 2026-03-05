@@ -309,19 +309,33 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
         const participantIds: { participantId: string; isLeader: boolean }[] = []
 
         for (const m of members) {
-            // Check if a user with this email already exists
-            let user = await tx.user.findUnique({ where: { email: m.email } })
+            // Look up an existing participant by CNIC first (stable identifier)
+            let participant = await tx.participant.findUnique({
+                where: { cnic: m.cnic },
+                include: { user: true },
+            })
 
-            if (!user) {
-                user = await tx.user.create({
-                    data: { email: m.email, type: 'PARTICIPANT' },
+            if (participant) {
+                // Participant already exists — update their details
+                participant = await tx.participant.update({
+                    where: { id: participant.id },
+                    data: {
+                        fullName:    m.fullName,
+                        phone:       m.phone || null,
+                        institution: m.institution || null,
+                    },
+                    include: { user: true },
                 })
-            }
+            } else {
+                // No participant with this CNIC — check if a User with this email already exists
+                let user = await tx.user.findUnique({ where: { email: m.email } })
 
-            // Upsert participant by cnic
-            let participant = await tx.participant.findUnique({ where: { cnic: m.cnic } })
+                if (!user) {
+                    user = await tx.user.create({
+                        data: { email: m.email, type: 'PARTICIPANT' },
+                    })
+                }
 
-            if (!participant) {
                 participant = await tx.participant.create({
                     data: {
                         userId:      user.id,
@@ -331,16 +345,7 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
                         phone:       m.phone || null,
                         institution: m.institution || null,
                     },
-                })
-            } else {
-                // Update participant details (name, phone, institution may change)
-                participant = await tx.participant.update({
-                    where: { id: participant.id },
-                    data: {
-                        fullName:    m.fullName,
-                        phone:       m.phone || null,
-                        institution: m.institution || null,
-                    },
+                    include: { user: true },
                 })
             }
 

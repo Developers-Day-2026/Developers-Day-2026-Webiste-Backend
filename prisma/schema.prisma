@@ -22,6 +22,7 @@ enum StaffRole {
   FOOD
   EXCOM
   COMPETITIONS
+  AMBASSADOR_MANAGEMENT
 }
 
 enum RegistrationStatus {
@@ -63,6 +64,8 @@ enum Action {
   ASSIGN_ACTIONS_TO_USERS
   CREATE_ACCOUNTS
   UPDATE_PARTICIPANT_RECORD
+  VIEW_AMBASSADOR_DASHBOARD
+  MANAGE_AMBASSADORS
 }
 
 
@@ -298,6 +301,7 @@ model BrandAmbassador {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   fullName  String   @db.VarChar(100)
+  cnic      String   @unique @db.VarChar(15)
   institute String   @db.VarChar(200)
   referralCode String @unique @db.VarChar(20)
 
@@ -307,6 +311,7 @@ model BrandAmbassador {
   updatedAt DateTime @updatedAt
 
   @@index([referralCode])
+  @@index([cnic])
 }
 
 

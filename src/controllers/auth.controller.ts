@@ -135,12 +135,13 @@ export async function loginUser(req: Request, res: Response): Promise<void> {
 
 // Maps frontend role strings to Prisma StaffRole enum values
 const ROLE_MAP: Record<string, StaffRole> = {
-    excom:        StaffRole.EXCOM,
-    pr:           StaffRole.PR,
-    gr:           StaffRole.GR,
-    food:         StaffRole.FOOD,
-    cs:           StaffRole.COMPETITIONS,
-    superadmin:   StaffRole.SUPERADMIN,
+    excom:                  StaffRole.EXCOM,
+    pr:                     StaffRole.PR,
+    gr:                     StaffRole.GR,
+    food:                   StaffRole.FOOD,
+    cs:                     StaffRole.COMPETITIONS,
+    superadmin:             StaffRole.SUPERADMIN,
+    'ambassador-management': StaffRole.AMBASSADOR_MANAGEMENT,
 }
 
 export async function registerStaff(req: Request, res: Response): Promise<void> {
@@ -167,69 +168,92 @@ export async function registerStaff(req: Request, res: Response): Promise<void> 
         return
     }
 
-    // check for duplicate email or nuId in prisma before touching Supabase
-    const [existingEmail, existingNuId] = await Promise.all([
-        prisma.user.findUnique({ where: { email } }),
-        prisma.staffProfile.findUnique({ where: { nuId } }),
-    ])
-
-    if (existingEmail) {
-        res.status(409).json({ success: false, message: 'An account with this email already exists.' })
-        return
-    }
+    // Check for duplicate nuId (hard conflict — same NU ID can't have two staff profiles)
+    const existingNuId = await prisma.staffProfile.findUnique({ where: { nuId } })
     if (existingNuId) {
         res.status(409).json({ success: false, message: 'A staff profile with this NU ID already exists.' })
         return
     }
 
-    // create user in supabase
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        // app_metadata is admin-only — users cannot modify it via the client SDK
-        // This is what the Next.js middleware reads for role-based route protection
-        app_metadata: {
-            role: staffRole,
-        },
-        // user_metadata is readable by the user but we keep it for convenience
-        user_metadata: {
-            full_name: fullName,
-            role:      staffRole,
-            nu_id:     nuId,
-        },
+    const existingUser = await prisma.user.findUnique({
+        where: { email },
+        include: { staffProfile: true },
     })
 
-    if (authError || !authData.user) {
-        console.error('[register] Supabase auth error:', authError)
-        if (authError?.message?.toLowerCase().includes('already')) {
-            res.status(409).json({ success: false, message: 'An account with this email already exists.' })
-        } else {
-            res.status(500).json({ success: false, message: authError?.message ?? 'Failed to create auth user.' })
+    // If user exists AND already has a staff profile, that's a real conflict
+    if (existingUser?.staffProfile) {
+        res.status(409).json({ success: false, message: 'This user already has a staff profile.' })
+        return
+    }
+
+
+    const supabaseCreatePayload = {
+        email,
+        password,
+        email_confirm: true as const,
+        app_metadata: { role: staffRole },
+        user_metadata: { full_name: fullName, role: staffRole, nu_id: nuId },
+    }
+
+    let { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser(supabaseCreatePayload)
+
+    // Ghost-user recovery (Supabase has email but Prisma doesn't, or partial previous attempt)
+    if (authError?.message?.toLowerCase().includes('already')) {
+        console.warn('[register] Ghost Supabase user detected for', email, '— cleaning up and retrying.')
+        const { data: listData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
+        const ghost = listData?.users?.find((u) => u.email === email)
+        if (ghost) {
+            await supabaseAdmin.auth.admin.deleteUser(ghost.id)
+            ;({ data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser(supabaseCreatePayload))
         }
+    }
+
+    if (authError || !authData?.user) {
+        console.error('[register] Supabase auth error:', authError)
+        res.status(500).json({ success: false, message: authError?.message ?? 'Failed to create auth user.' })
         return
     }
 
     const supabaseUserId = authData.user.id
 
-    // enter into prisma also using the same UUID so relations stay consistent
+    // ── Prisma: reuse existing User or create new one ─────────────────────
+
     try {
-        const user = await prisma.user.create({
-            data: {
-                id:    supabaseUserId,
-                email,
-                type:  UserType.STAFF,
-                staffProfile: {
-                    create: {
+        let user: { id: string; email: string; staffProfile: { nuId: string; fullName: string; staffRole: StaffRole; isApproved: boolean } | null }
+
+        if (existingUser) {
+            // User already exists (e.g. was a participant/ambassador) — update id to match Supabase
+            // and attach a StaffProfile. Also promote type to STAFF.
+            const [updatedUser, staffProfile] = await prisma.$transaction([
+                prisma.user.update({
+                    where: { id: existingUser.id },
+                    data:  { type: UserType.STAFF },
+                }),
+                prisma.staffProfile.create({
+                    data: {
+                        id: existingUser.id,
                         fullName,
                         nuId,
                         staffRole,
                         isApproved: false,
                     },
+                }),
+            ])
+            user = { id: updatedUser.id, email: updatedUser.email, staffProfile }
+        } else {
+            // Brand-new user
+            user = await prisma.user.create({
+                data: {
+                    id:    supabaseUserId,
+                    email,
+                    type:  UserType.STAFF,
+                    staffProfile: {
+                        create: { fullName, nuId, staffRole, isApproved: false },
+                    },
                 },
-            },
-            include: { staffProfile: true },
-        })
+                include: { staffProfile: true },
+            })
+        }
 
         res.status(201).json({
             success: true,

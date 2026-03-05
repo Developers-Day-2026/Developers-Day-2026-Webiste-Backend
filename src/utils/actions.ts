@@ -20,6 +20,8 @@ export const ALL_ACTIONS = [
     'ASSIGN_ACTIONS_TO_USERS',
     'CREATE_ACCOUNTS',
     'UPDATE_PARTICIPANT_RECORD',
+    'VIEW_AMBASSADOR_DASHBOARD',
+    'MANAGE_AMBASSADORS',
 ] as const
 
 export type ActionEnum = (typeof ALL_ACTIONS)[number]
@@ -52,6 +54,10 @@ export const ROLE_DEFAULT_ACTIONS: Record<string, ActionEnum[]> = {
     EXCOM: [
         'VIEW_ALL_PORTAL_USERS',
         'VIEW_REGISTRATION_DETAILS',
+    ],
+    AMBASSADOR_MANAGEMENT: [
+        'VIEW_AMBASSADOR_DASHBOARD',
+        'MANAGE_AMBASSADORS',
     ],
     SUPERADMIN: [...ALL_ACTIONS],
 }
