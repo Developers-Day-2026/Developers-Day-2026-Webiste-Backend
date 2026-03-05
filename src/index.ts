@@ -13,12 +13,14 @@ connectDB();
 app.use(express.json());
 
 // Routes
-import authRoutes from "./routes/auth.routes";
-import userRoutes from "./routes/user.routes";
-import registrationRoutes from "./routes/registration.routes";
-app.use("/auth", authRoutes);
-app.use("/users", userRoutes);
-app.use("/registrations", registrationRoutes);
+import authRoutes from './routes/auth.routes'
+import userRoutes from './routes/user.routes'
+import registrationRoutes from './routes/registration.routes'
+import competitionRoutes from './routes/competition.routes'
+app.use('/auth', authRoutes)
+app.use('/users', userRoutes)
+app.use('/registrations', registrationRoutes)
+app.use('/competitions', competitionRoutes)
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("Express + TypeScript Server");

@@ -11,7 +11,7 @@ const prisma = new PrismaClient({
 
 
 const ids = {
-    venues: ['v-001', 'v-002', 'v-003', 'v-004', 'v-005'],
+    venues: ['v-001', 'v-002', 'v-003', 'v-004', 'v-005', 'v-006'],
 
     categories: ['cat-001', 'cat-002', 'cat-003', 'cat-004', 'cat-005'],
 
@@ -47,11 +47,12 @@ async function main() {
     console.log('📍 Seeding venues...')
 
     const venueData = [
-        { id: ids.venues[0], name: 'Arena Hall',       location: 'Block A, Ground Floor', capacity: 500,  facilities: 'Projector, Sound System, AC' },
-        { id: ids.venues[1], name: 'Conference Room A', location: 'Block B, 2nd Floor',   capacity: 80,   facilities: 'Whiteboard, Projector, Video Conferencing' },
-        { id: ids.venues[2], name: 'Outdoor Stage',    location: 'Main Courtyard',         capacity: 1000, facilities: 'Open Air, Large LED Screen, Sound System' },
-        { id: ids.venues[3], name: 'Tech Lab 1',       location: 'Block C, 3rd Floor',     capacity: 60,   facilities: '30 Workstations, High-Speed Internet, AC' },
-        { id: ids.venues[4], name: 'Exhibition Hall',  location: 'Block D, Ground Floor',  capacity: 300,  facilities: 'Exhibition Stands, Lighting, PA System' },
+        { id: ids.venues[0], name: 'LAB 1', location: 'Block A, 1st Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
+        { id: ids.venues[1], name: 'LAB 2', location: 'Block A, 1st Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
+        { id: ids.venues[2], name: 'LAB 3', location: 'Block B, 2nd Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
+        { id: ids.venues[3], name: 'LAB 4', location: 'Block B, 2nd Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
+        { id: ids.venues[4], name: 'LAB 5', location: 'Block C, 3rd Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
+        { id: ids.venues[5], name: 'LAB 6', location: 'Block C, 3rd Floor', capacity: 60, facilities: '30 Workstations, High-Speed Internet, AC' },
     ]
 
     for (const v of venueData) {
@@ -243,42 +244,47 @@ async function main() {
         {
             id: ids.competitions[0], name: 'Speed Programming',
             description: 'Solve algorithmic challenges under time pressure. Individual or team submission.',
-            venueId: ids.venues[3], fee: 500, minTeamSize: 1, maxTeamSize: 2, capacityLimit: 60,
+            venueIds: [ids.venues[0]], fee: 500, minTeamSize: 1, maxTeamSize: 2, capacityLimit: 60,
             compDay: day, startTime: new Date('2026-03-15T09:00:00'), endTime: new Date('2026-03-15T12:00:00'),
             registrationDeadline: new Date('2026-03-10T23:59:00'),
         },
         {
             id: ids.competitions[1], name: 'Idea Incubator',
             description: 'Pitch your startup idea to a panel of industry judges. Best pitch wins.',
-            venueId: ids.venues[1], fee: 300, minTeamSize: 2, maxTeamSize: 4, capacityLimit: 40,
+            venueIds: [ids.venues[1]], fee: 300, minTeamSize: 2, maxTeamSize: 4, capacityLimit: 40,
             compDay: day, startTime: new Date('2026-03-15T10:00:00'), endTime: new Date('2026-03-15T14:00:00'),
             registrationDeadline: new Date('2026-03-10T23:59:00'),
         },
         {
             id: ids.competitions[2], name: 'Robo Wars',
             description: 'Battle of autonomous robots. Build, program, and fight.',
-            venueId: ids.venues[0], fee: 1000, minTeamSize: 2, maxTeamSize: 4, capacityLimit: 20,
+            venueIds: [ids.venues[2], ids.venues[3]], fee: 1000, minTeamSize: 2, maxTeamSize: 4, capacityLimit: 20,
             compDay: day, startTime: new Date('2026-03-15T11:00:00'), endTime: new Date('2026-03-15T16:00:00'),
             registrationDeadline: new Date('2026-03-08T23:59:00'),
         },
         {
             id: ids.competitions[3], name: 'UI/UX Design Sprint',
             description: 'Design a complete product flow for a given problem statement in 3 hours.',
-            venueId: ids.venues[3], fee: 400, minTeamSize: 1, maxTeamSize: 3, capacityLimit: 45,
+            venueIds: [ids.venues[4]], fee: 400, minTeamSize: 1, maxTeamSize: 3, capacityLimit: 45,
             compDay: day, startTime: new Date('2026-03-15T09:30:00'), endTime: new Date('2026-03-15T13:00:00'),
             registrationDeadline: new Date('2026-03-10T23:59:00'),
         },
         {
             id: ids.competitions[4], name: 'Capture The Flag',
             description: 'Cybersecurity challenge. Exploit, recover flags, win.',
-            venueId: ids.venues[3], fee: 600, minTeamSize: 2, maxTeamSize: 3, capacityLimit: 30,
+            venueIds: [ids.venues[5]], fee: 600, minTeamSize: 2, maxTeamSize: 3, capacityLimit: 30,
             compDay: day, startTime: new Date('2026-03-15T10:00:00'), endTime: new Date('2026-03-15T17:00:00'),
             registrationDeadline: new Date('2026-03-09T23:59:00'),
         },
     ]
 
     for (const c of competitionData) {
-        await prisma.competition.upsert({ where: { id: c.id }, create: c, update: { name: c.name, description: c.description, fee: c.fee } })
+        const { venueIds, ...rest } = c
+        await prisma.competition.upsert({
+            where:  { id: c.id },
+            create: { ...rest, venues: { connect: venueIds.map((id) => ({ id })) } },
+            update: { name: c.name, description: c.description, fee: c.fee, venues: { set: venueIds.map((id) => ({ id })) } },
+        })
     }
     console.log(`   ✓ ${competitionData.length} competitions\n`)
 

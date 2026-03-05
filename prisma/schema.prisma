@@ -47,8 +47,7 @@ enum PaymentMethod {
 /// Every discrete operation a portal user can perform.
 enum Action {
   VIEW_REGISTRATION_DETAILS
-  VIEW_ALL_COMPETITIONS
-  EDIT_COMPETITION_TIME
+  EDIT_COMPETITION
   VIEW_STALL_DETAILS
   ADD_NEW_STALL
   EDIT_STALL
@@ -129,8 +128,7 @@ model Competition {
   id             String   @id @default(uuid())
   name           String   @db.VarChar(100)
   description    String?  @db.Text
-  venueId        String?
-  venue          Venue?   @relation(fields: [venueId], references: [id])
+  venues         Venue[]  // many-to-many
 
   fee            Decimal  @default(0) @db.Decimal(10,2)
   minTeamSize    Int      @default(1)

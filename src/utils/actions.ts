@@ -4,8 +4,7 @@ import { prisma } from '../config/db'
 
 export const ALL_ACTIONS = [
     'VIEW_REGISTRATION_DETAILS',
-    'VIEW_ALL_COMPETITIONS',
-    'EDIT_COMPETITION_TIME',
+    'EDIT_COMPETITION',
     'VIEW_STALL_DETAILS',
     'ADD_NEW_STALL',
     'EDIT_STALL',
@@ -30,8 +29,7 @@ export type ActionEnum = (typeof ALL_ACTIONS)[number]
 export const ROLE_DEFAULT_ACTIONS: Record<string, ActionEnum[]> = {
     COMPETITIONS: [
         'VIEW_REGISTRATION_DETAILS',
-        'VIEW_ALL_COMPETITIONS',
-        'EDIT_COMPETITION_TIME',
+        'EDIT_COMPETITION',
     ],
     FOOD: [
         'VIEW_STALL_DETAILS',
@@ -54,7 +52,6 @@ export const ROLE_DEFAULT_ACTIONS: Record<string, ActionEnum[]> = {
     EXCOM: [
         'VIEW_ALL_PORTAL_USERS',
         'VIEW_REGISTRATION_DETAILS',
-        'VIEW_ALL_COMPETITIONS',
     ],
     SUPERADMIN: [...ALL_ACTIONS],
 }
