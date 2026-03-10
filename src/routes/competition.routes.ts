@@ -3,11 +3,19 @@ import { z } from 'zod'
 import { validate } from '../middleware/validate'
 import { requireAuth } from '../middleware/auth'
 import { requireAction } from '../middleware/permission'
-import { listCompetitions, updateCompetitionTime, updateCompetitionVenues } from '../controllers/competition.controller'
+import {
+    listCompetitions,
+    listCompetitionsWithCategory,
+    updateCompetitionTime,
+    updateCompetitionVenues,
+} from '../controllers/competition.controller'
 
 const router = Router()
 
-// GET /competitions — list all competitions
+// GET /competitions/public — public list with category
+router.get('/public', listCompetitionsWithCategory)
+
+// GET /competitions — admin list of competitions
 router.get('/', requireAuth, requireAction('EDIT_COMPETITION'), listCompetitions)
 
 // PATCH /competitions/:id/time — update start/end time

@@ -1,6 +1,7 @@
-import { Response } from 'express'
+import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { prisma } from '../config/db'
+import { buildCompetitionCategoryMap } from '../utils/competitionsCsv'
 
 // Fixed venues list (seeded in DB)
 export const LAB_VENUES = ['LAB 1', 'LAB 2', 'LAB 3', 'LAB 4', 'LAB 5', 'LAB 6']
@@ -33,6 +34,38 @@ export async function listCompetitions(_req: AuthRequest, res: Response): Promis
             endTime:              c.endTime.toISOString(),
             isActive:             c.isActive,
             registrationDeadline: c.registrationDeadline?.toISOString() ?? null,
+        })),
+    })
+}
+
+// GET /competitions/public — list competitions with category (no auth)
+
+let cachedCategoryMap: Map<string, string> | null = null
+
+function getCategoryMap(): Map<string, string> {
+    if (!cachedCategoryMap) {
+        cachedCategoryMap = buildCompetitionCategoryMap()
+    }
+    return cachedCategoryMap
+}
+
+export async function listCompetitionsWithCategory(_req: Request, res: Response): Promise<void> {
+    const competitions = await prisma.competition.findMany({
+        orderBy: [{ name: 'asc' }],
+    })
+
+    const categoryMap = getCategoryMap()
+
+    res.json({
+        success: true,
+        data: competitions.map((c) => ({
+            id:          c.id,
+            name:        c.name,
+            category:    categoryMap.get(c.name) ?? 'Uncategorized',
+            description: c.description ?? null,
+            fee:         Number(c.fee),
+            minTeamSize: c.minTeamSize,
+            maxTeamSize: c.maxTeamSize,
         })),
     })
 }
