@@ -40,6 +40,7 @@ model Participant {
   institution            String?                 @db.VarChar(200)
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
+  rollNumber             String?                 @db.VarChar(20)
   competitionAttendances CompetitionAttendance[]
   user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   teamMembers            TeamMember[]
