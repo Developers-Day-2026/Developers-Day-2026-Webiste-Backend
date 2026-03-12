@@ -4,12 +4,21 @@ import { z } from 'zod'
 import { RegistrationStatus } from '@prisma/client'
 import { PaymentRequest } from '../middleware/uploadPaymentProof'
 
+const ROLL_NUMBER_REGEX = /^\d{2}[IPLKMF]\d{4}$/
+
 const publicMemberSchema = z.object({
     fullName:    z.string().min(1, 'Full name is required'),
     email:       z.string().email('Invalid email'),
     cnic:        z.string().min(13, 'CNIC must be at least 13 characters'),
     phone:       z.string().optional().default(''),
     institution: z.string().optional().default(''),
+    rollNumber:  z.string().trim().optional().refine(
+        (value) => {
+            if (!value) return true
+            return ROLL_NUMBER_REGEX.test(value.toUpperCase())
+        },
+        { message: 'Invalid roll number format.' }
+    ),
 })
 
 const publicRegistrationSchema = z.object({
@@ -22,6 +31,13 @@ const publicRegistrationSchema = z.object({
     leaderCnic:       z.string().min(13, 'Leader CNIC must be at least 13 characters'),
     leaderPhone:      z.string().optional().default(''),
     leaderInstitution:z.string().optional().default(''),
+    leaderRollNumber: z.string().trim().optional().refine(
+        (value) => {
+            if (!value) return true
+            return ROLL_NUMBER_REGEX.test(value.toUpperCase())
+        },
+        { message: 'Invalid leader roll number format.' }
+    ),
     members:          z.string().optional().default(''),
 })
 
@@ -29,25 +45,27 @@ function normalizeCnic(value: string): string {
     return value.replace(/\D/g, '')
 }
 
-function parseMembers(raw: string | undefined): z.infer<typeof publicMemberSchema>[] {
-    if (!raw) return []
+function parseMembersStrict(raw: string | undefined):
+    | { ok: true; members: z.infer<typeof publicMemberSchema>[] }
+    | { ok: false; issues: z.ZodIssue[] } {
+    if (!raw) return { ok: true, members: [] }
 
     try {
         const parsed = JSON.parse(raw)
-        if (!Array.isArray(parsed)) return []
-
-        const validMembers: z.infer<typeof publicMemberSchema>[] = []
-
-        for (const candidate of parsed) {
-            const result = publicMemberSchema.safeParse(candidate)
-            if (result.success) {
-                validMembers.push(result.data)
-            }
-        }
-
-        return validMembers
+        const result = z.array(publicMemberSchema).safeParse(parsed)
+        if (!result.success) return { ok: false, issues: result.error.issues }
+        return { ok: true, members: result.data }
     } catch {
-        return []
+        return {
+            ok: false,
+            issues: [
+                {
+                    code: 'custom',
+                    path: ['members'],
+                    message: 'members must be a valid JSON array.',
+                } as z.ZodIssue,
+            ],
+        }
     }
 }
 
@@ -82,12 +100,19 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
         leaderCnic,
         leaderPhone,
         leaderInstitution,
+        leaderRollNumber,
         members: membersRaw,
     } = parsed.data
 
     const isEarlyBird = isEarlyBirdRaw === 'true'
 
-    const extraMembers = parseMembers(membersRaw)
+    const parsedMembers = parseMembersStrict(membersRaw)
+    if (!parsedMembers.ok) {
+        res.status(400).json({ success: false, errors: parsedMembers.issues })
+        return
+    }
+
+    const extraMembers = parsedMembers.members
 
     const allCnics = [
         normalizeCnic(leaderCnic),
@@ -152,19 +177,8 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
         return
     }
 
-    const refToUse = referenceCode?.trim() || ''
-    if (refToUse) {
-        const existingRef = await prisma.team.findUnique({
-            where: { referenceId: refToUse },
-        })
-        if (existingRef) {
-            res.status(409).json({
-                success: false,
-                message: 'Reference code already in use. Leave it empty for auto-generation.',
-            })
-            return
-        }
-    }
+    const asfandCode = 'asfand_code'
+    const refToUse = referenceCode?.trim() || asfandCode;
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -175,6 +189,7 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                     cnic:        normalizeCnic(leaderCnic),
                     phone:       (leaderPhone || '').trim(),
                     institution: (leaderInstitution || '').trim(),
+                    rollNumber:  (leaderRollNumber || '').trim(),
                 },
                 ...extraMembers.map((m) => ({
                     fullName:    m.fullName.trim(),
@@ -182,6 +197,7 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                     cnic:        normalizeCnic(m.cnic),
                     phone:       (m.phone || '').trim(),
                     institution: (m.institution || '').trim(),
+                    rollNumber:  (m.rollNumber || '').trim(),
                 })),
             ]
 
@@ -203,6 +219,7 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                             fullName:    m.fullName,
                             phone:       m.phone || null,
                             institution: m.institution || null,
+                            ...(m.rollNumber ? { rollNumber: m.rollNumber.toUpperCase() } : {}),
                         },
                         include: { user: true },
                     })
@@ -230,6 +247,7 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                             fullName:    m.fullName,
                             phone:       m.phone || null,
                             institution: m.institution || null,
+                            rollNumber:  m.rollNumber ? m.rollNumber.toUpperCase() : null,
                         },
                         include: { user: true },
                     })
@@ -238,15 +256,34 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                 participantIds.push({ participantId: participant.id, isLeader })
             }
 
-            const referenceId = refToUse || generateReferenceId()
+            //agar koi code dia hai to sahi wrna hardcode, also yay pata nai variable alag q banaya tha owais ne but i made my own anyways
+            let referenceId = ''
+
+            if (refToUse!== asfandCode) {
+                const ba = await tx.brandAmbassador.findUnique({
+                    where: { referralCode: refToUse },
+                    select: { id: true },
+                })
+
+                if (!ba) {
+                    const err = new Error('BA_CODE_INVALID') as Error & { code: string }
+                    err.code = 'BA_CODE_INVALID'
+                    throw err
+                }
+
+                referenceId = refToUse
+            } else {
+                referenceId = asfandCode
+            }
+            
 
             const seatUpdate = isEarlyBird
                 ? await tx.competition.updateMany({
-                      where: { id: competitionId, earlyBirdLimit: { gt: 0 } },
+                      where: { id: competitionId, earlyBirdLimit: { gt: -2 } },
                       data: { earlyBirdLimit: { decrement: 1 } },
                   })
                 : await tx.competition.updateMany({
-                      where: { id: competitionId, capacityLimit: { gt: 0 } },
+                      where: { id: competitionId, capacityLimit: { gt: -2 } },
                       data: { capacityLimit: { decrement: 1 } },
                   })
 
@@ -298,6 +335,11 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
         })
     } catch (error: any) {
         console.error('[createPublicRegistration] Failed to create registration:', error)
+
+        if (error?.code === 'BA_CODE_INVALID' || String(error?.message || '') === 'BA_CODE_INVALID') {
+            res.status(400).json({ success: false, message: 'BA Code is invalid.' })
+            return
+        }
 
         if (error?.code === 'EARLY_BIRD_FULL' || String(error?.message || '') === 'EARLY_BIRD_FULL') {
             res.status(409).json({
