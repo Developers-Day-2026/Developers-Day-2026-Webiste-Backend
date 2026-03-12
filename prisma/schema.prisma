@@ -78,7 +78,7 @@ model Team {
   id              String                  @id @default(uuid())
   competitionId   String
   name            String                  @db.VarChar(100)
-  referenceId     String                  @unique @db.VarChar(50)
+  referenceId     String                  @db.VarChar(50)
   paymentStatus   RegistrationStatus      @default(PENDING_PAYMENT)
   paymentProofUrl String?                 @db.VarChar(500)
   paymentMethod   PaymentMethod?

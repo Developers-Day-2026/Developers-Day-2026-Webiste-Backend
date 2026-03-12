@@ -296,12 +296,8 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
         return
     }
 
-    // Check referenceId uniqueness
-    const existingRef = await prisma.team.findUnique({ where: { referenceId } })
-    if (existingRef) {
-        res.status(409).json({ success: false, message: 'Reference ID already exists.' })
-        return
-    }
+  
+  
 
     // Upsert participants and build team in a transaction
     const result = await prisma.$transaction(async (tx) => {

@@ -178,18 +178,6 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
     }
 
     const refToUse = referenceCode?.trim() || ''
-    if (refToUse) {
-        const existingRef = await prisma.team.findUnique({
-            where: { referenceId: refToUse },
-        })
-        if (existingRef) {
-            res.status(409).json({
-                success: false,
-                message: 'Reference code already in use. Leave it empty for auto-generation.',
-            })
-            return
-        }
-    }
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -267,7 +255,24 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
                 participantIds.push({ participantId: participant.id, isLeader })
             }
 
-            const referenceId = refToUse || generateReferenceId()
+            // If the user provided a referral code, validate it against BrandAmbassador table.
+            // If not provided, generate a unique reference id for this registration.
+            let referenceId = ''
+
+         
+            const ba = await tx.brandAmbassador.findUnique({
+                where: { referralCode: refToUse },
+                select: { id: true },
+            })
+
+            if (!ba) {
+                const err = new Error('BA_CODE_INVALID') as Error & { code: string }
+                err.code = 'BA_CODE_INVALID'
+                throw err
+            }
+
+            referenceId = refToUse
+            
 
             const seatUpdate = isEarlyBird
                 ? await tx.competition.updateMany({
@@ -327,6 +332,11 @@ export async function createPublicRegistration(req: PaymentRequest, res: Respons
         })
     } catch (error: any) {
         console.error('[createPublicRegistration] Failed to create registration:', error)
+
+        if (error?.code === 'BA_CODE_INVALID' || String(error?.message || '') === 'BA_CODE_INVALID') {
+            res.status(400).json({ success: false, message: 'BA Code is invalid.' })
+            return
+        }
 
         if (error?.code === 'EARLY_BIRD_FULL' || String(error?.message || '') === 'EARLY_BIRD_FULL') {
             res.status(409).json({
