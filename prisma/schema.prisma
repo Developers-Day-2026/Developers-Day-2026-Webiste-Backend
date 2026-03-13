@@ -69,6 +69,7 @@ model Competition {
   earlyBirdLimit       Int       @default(0)
   teams                Team[]
   venues               Venue[]   @relation("CompetitionToVenue")
+  totalSeats           Int       @default(0)
 
   @@index([compDay])
   @@index([isActive])
