@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npx tsc",
-    "start": "node dist/index.js",
-    "dev": "nodemon src/index.ts",
+    "build": "node init && npx tsc",
+    "start": "node init && node dist/index.js",
+    "dev": "node init && nodemon src/index.ts",
     "seed": "ts-node prisma/seed.ts",
     "postinstall": "prisma generate"
   },
@@ -38,6 +38,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.2",
     "multer": "^2.1.1",
+    "node-fetch": "^3.3.2",
     "pg": "^8.17.2",
     "prisma": "^5.22.0",
     "zod": "^4.3.6"
