@@ -62,24 +62,41 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
             take: limit,
             orderBy: { createdAt: 'desc' },
             include: {
-                competition: { select: { id: true, name: true, compDay: true, fee: true } },
+                competition: { select: { id: true, name: true, compDay: true, fee: true, earlyBirdFee: true } },
                 _count:      { select: { members: true } },
+                members: {
+                    select: {
+                        teamEmailsQueue: {
+                            select: { noteRejection: true, noteOnHold: true },
+                            take: 1,
+                        },
+                    },
+                },
             },
         }),
     ])
 
     res.json({
         success: true,
-        data: teams.map((t) => ({
-            id:            t.id,
-            name:          t.name,
-            referenceId:   t.referenceId,
-            paymentStatus: t.paymentStatus,
-            paymentMethod: t.paymentMethod,
-            competition:   t.competition,
-            memberCount:   t._count.members,
-            createdAt:     t.createdAt,
-        })),
+        data: teams.map((t) => {
+            const note = t.members
+                .flatMap((m) => m.teamEmailsQueue)
+                .map((q) => q.noteRejection || q.noteOnHold || null)
+                .find((value): value is string => Boolean(value)) || null
+
+            return {
+                id:            t.id,
+                name:          t.name,
+                referenceId:   t.referenceId,
+                paymentStatus: t.paymentStatus,
+                paymentMethod: t.paymentMethod,
+                paymentProofUrl: t.paymentProofUrl,
+                competition:   {...t.competition, fee: t.isEarlyBird ? t.competition.earlyBirdFee : t.competition.fee },
+                memberCount:   t._count.members,
+                note,
+                createdAt:     t.createdAt,
+            }
+        }),
         meta: {
             total,
             page,
@@ -108,6 +125,7 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
             paymentDate:     true,
             declaredTID:     true,
             amountPaid:      true,
+            isEarlyBird:     true,
             paymentProofUrl: true,
             createdAt:       true,
             updatedAt:       true,
@@ -117,6 +135,7 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
                     name:        true,
                     compDay:     true,
                     fee:         true,
+                    earlyBirdFee: true,
                     minTeamSize: true,
                     maxTeamSize: true,
                 },
@@ -190,9 +209,10 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
             declaredTID:     team.declaredTID,
             amountPaid:      team.amountPaid ? String(team.amountPaid) : null,
             paymentProofUrl: team.paymentProofUrl,
+            isEarlyBird:     team.isEarlyBird,
             createdAt:       team.createdAt,
             updatedAt:       team.updatedAt,
-            competition:     team.competition,
+            competition:     { ...team.competition, fee: team.isEarlyBird ? team.competition.earlyBirdFee : team.competition.fee },
             note,
             members: team.members.map((m) => {
                 const att = attendanceRecords.find((a) => a.participantId === m.participantId)
