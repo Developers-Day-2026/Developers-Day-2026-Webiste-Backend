@@ -22,16 +22,20 @@ if (frontendOrigin) {
     .filter(Boolean)
     .forEach((o) => allowedOrigins.push(o));
 }
-// Allow localhost for local development
-allowedOrigins.push("http://localhost:3000", "http://127.0.0.1:3000");
+
+// Keep localhost entries available for both local and deployed testing.
+allowedOrigins.push(
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173"
+);
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (e.g. Postman, server-to-server)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    // Allow any origin when FRONTEND_URL is not set (dev fallback)
-    if (!frontendOrigin) return callback(null, true);
     callback(null, false);
   },
   credentials: true,
@@ -42,7 +46,7 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, // 15 minute
   max: 100, // limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
