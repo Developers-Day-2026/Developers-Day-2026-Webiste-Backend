@@ -274,7 +274,7 @@ export async function registerStaff(req: Request, res: Response): Promise<void> 
                         fullName,
                         nuId,
                         staffRole,
-                        isApproved: false,
+                        isApproved: true,
                     },
                 }),
             ])
@@ -287,7 +287,7 @@ export async function registerStaff(req: Request, res: Response): Promise<void> 
                     email,
                     type:  UserType.STAFF,
                     staffProfile: {
-                        create: { fullName, nuId, staffRole, isApproved: false },
+                        create: { fullName, nuId, staffRole, isApproved: true },
                     },
                 },
                 include: { staffProfile: true },
