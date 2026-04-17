@@ -15,7 +15,7 @@ export function requireAction(action: string) {
             return
         }
 
-        const effectiveActions = await getUserEffectiveActions(req.userId)
+        const effectiveActions = await getUserEffectiveActions(req.userId, req.userEmail)
 
         if (!effectiveActions.includes(action)) {
             res.status(403).json({

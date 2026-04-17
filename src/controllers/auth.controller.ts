@@ -76,28 +76,38 @@ export async function loginUser(req: Request, res: Response): Promise<void> {
     const { session, user: supabaseUser } = data
 
     // fetch matching prisma User + StaffProfile + extra granted actions
-    const prismaUser = await prisma.user.findUnique({
+    let prismaUser = await prisma.user.findUnique({
         where: { id: supabaseUser.id },
         include: { staffProfile: true, grantedActions: true },
     })
+
+    // Fallback: if Supabase authenticated OK but no Prisma record by ID
+    // (happens when an existing user was registered as staff — the Prisma
+    // user keeps its original ID while Supabase gets a new one), try email.
+    if (!prismaUser && supabaseUser.email) {
+        prismaUser = await prisma.user.findUnique({
+            where: { email: supabaseUser.email },
+            include: { staffProfile: true, grantedActions: true },
+        })
+    }
 
     if (!prismaUser) {
         res.status(404).json({ success: false, message: 'No account found for this user.' })
         return
     }
 
-    if (!prismaUser.isActive) {
-        res.status(403).json({ success: false, message: 'Your account has been deactivated.' })
-        return
-    }
+    // if (!prismaUser.isActive) {
+    //     res.status(403).json({ success: false, message: 'Your account has been deactivated.' })
+    //     return
+    // }
 
-    if (prismaUser.staffProfile && !prismaUser.staffProfile.isApproved) {
-        res.status(403).json({
-            success: false,
-            message: 'Your account is pending admin approval.',
-        })
-        return
-    }
+    // if (prismaUser.staffProfile && !prismaUser.staffProfile.isApproved) {
+    //     res.status(403).json({
+    //         success: false,
+    //         message: 'Your account is pending admin approval.',
+    //     })
+    //     return
+    // }
 
     // update lastLogin timestamp (fire-and-forget — non-critical, saves ~50 ms)
     prisma.user.update({
@@ -141,10 +151,18 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
         return
     }
 
-    const prismaUser = await prisma.user.findUnique({
+    let prismaUser = await prisma.user.findUnique({
         where: { id: userId },
         include: { staffProfile: true, grantedActions: true },
     })
+
+    // Fallback: Supabase ID may not match Prisma ID for existing-user registrations
+    if (!prismaUser && req.userEmail) {
+        prismaUser = await prisma.user.findUnique({
+            where: { email: req.userEmail },
+            include: { staffProfile: true, grantedActions: true },
+        })
+    }
 
     if (!prismaUser || !prismaUser.isActive) {
         res.status(404).json({ success: false, message: 'User not found.' })

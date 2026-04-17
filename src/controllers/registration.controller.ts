@@ -9,10 +9,6 @@ function normalizeCnic(value: string): string {
     return value.replace(/\D/g, '')
 }
 
-function hasNonEmptyValue(value: string | null | undefined): value is string {
-    return Boolean(value && value.trim())
-}
-
 
 // GET /registrations/competitions 
 
@@ -62,41 +58,24 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
             take: limit,
             orderBy: { createdAt: 'desc' },
             include: {
-                competition: { select: { id: true, name: true, compDay: true, fee: true, earlyBirdFee: true } },
+                competition: { select: { id: true, name: true, compDay: true, fee: true } },
                 _count:      { select: { members: true } },
-                members: {
-                    select: {
-                        teamEmailsQueue: {
-                            select: { noteRejection: true, noteOnHold: true },
-                            take: 1,
-                        },
-                    },
-                },
             },
         }),
     ])
 
     res.json({
         success: true,
-        data: teams.map((t) => {
-            const note = t.members
-                .flatMap((m) => m.teamEmailsQueue)
-                .map((q) => q.noteRejection || q.noteOnHold || null)
-                .find((value): value is string => Boolean(value)) || null
-
-            return {
-                id:            t.id,
-                name:          t.name,
-                referenceId:   t.referenceId,
-                paymentStatus: t.paymentStatus,
-                paymentMethod: t.paymentMethod,
-                paymentProofUrl: t.paymentProofUrl,
-                competition:   {...t.competition, fee: t.isEarlyBird ? t.competition.earlyBirdFee : t.competition.fee },
-                memberCount:   t._count.members,
-                note,
-                createdAt:     t.createdAt,
-            }
-        }),
+        data: teams.map((t) => ({
+            id:            t.id,
+            name:          t.name,
+            referenceId:   t.referenceId,
+            paymentStatus: t.paymentStatus,
+            paymentMethod: t.paymentMethod,
+            competition:   t.competition,
+            memberCount:   t._count.members,
+            createdAt:     t.createdAt,
+        })),
         meta: {
             total,
             page,
@@ -125,7 +104,6 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
             paymentDate:     true,
             declaredTID:     true,
             amountPaid:      true,
-            isEarlyBird:     true,
             paymentProofUrl: true,
             createdAt:       true,
             updatedAt:       true,
@@ -135,7 +113,6 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
                     name:        true,
                     compDay:     true,
                     fee:         true,
-                    earlyBirdFee: true,
                     minTeamSize: true,
                     maxTeamSize: true,
                 },
@@ -151,7 +128,6 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
                     participant: {
                         select: {
                             id:          true,
-                            minigameCode: true,
                             fullName:    true,
                             email:       true,
                             cnic:        true,
@@ -197,6 +173,10 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
         ? queueEntry.noteRejection || queueEntry.noteOnHold || ''
         : null
 
+    const attendanceByParticipantId = new Map(
+        attendanceRecords.map((record) => [record.participantId, record])
+    )
+
     res.json({
         success: true,
         data: {
@@ -209,13 +189,12 @@ export async function getRegistration(req: AuthRequest, res: Response): Promise<
             declaredTID:     team.declaredTID,
             amountPaid:      team.amountPaid ? String(team.amountPaid) : null,
             paymentProofUrl: team.paymentProofUrl,
-            isEarlyBird:     team.isEarlyBird,
             createdAt:       team.createdAt,
             updatedAt:       team.updatedAt,
-            competition:     { ...team.competition, fee: team.isEarlyBird ? team.competition.earlyBirdFee : team.competition.fee },
+            competition:     team.competition,
             note,
             members: team.members.map((m) => {
-                const att = attendanceRecords.find((a) => a.participantId === m.participantId)
+                const att = attendanceByParticipantId.get(m.participantId)
                 return {
                     id:           m.id,
                     isLeader:     m.isLeader,
@@ -278,7 +257,7 @@ export async function updateTeamPaymentStatus(req: AuthRequest, res: Response): 
             })
         }
 
-    }, { timeout: 15000 })
+    })
 
     res.json({
         success: true,
@@ -485,17 +464,15 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
     }
   
 
-    try {
-        // Upsert participants and build team in a transaction
-        const result = await prisma.$transaction(async (tx) => {
+    // Upsert participants and build team in a transaction
+    const result = await prisma.$transaction(async (tx) => {
         // Upsert each participant by CNIC
         const participantIds: { participantId: string; isLeader: boolean }[] = []
 
         for (const m of members) {
-            const normalizedCnic = normalizeCnic(m.cnic)
             // Look up an existing participant by CNIC first (stable identifier)
             let participant = await tx.participant.findUnique({
-                where: { cnic: normalizedCnic },
+                where: { cnic: m.cnic },
                 include: { user: true },
             })
 
@@ -512,59 +489,25 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
                 })
             } else {
                 // No participant with this CNIC — check if a User with this email already exists
-                const existingUser = await tx.user.findUnique({
-                    where: { email: m.email },
-                    include: { participant: true },
-                })
+                let user = await tx.user.findUnique({ where: { email: m.email } })
 
-                if (existingUser?.participant) {
-                    const existingParticipant = existingUser.participant
-                    if (normalizedCnic !== existingParticipant.cnic) {
-                        const cnicConflict = await tx.participant.findFirst({
-                            where: {
-                                cnic: normalizedCnic,
-                                id: { not: existingParticipant.id },
-                            },
-                            select: { id: true },
-                        })
-
-                        if (cnicConflict) {
-                            const err = new Error(`CNIC_TAKEN:${normalizedCnic}`) as Error & { code: string }
-                            err.code = 'CNIC_TAKEN'
-                            throw err
-                        }
-                    }
-
-                    const participantPatch = {
-                        ...(hasNonEmptyValue(normalizedCnic) ? { cnic: normalizedCnic } : {}),
-                        ...(hasNonEmptyValue(m.email) ? { email: m.email } : {}),
-                        ...(hasNonEmptyValue(m.fullName) ? { fullName: m.fullName } : {}),
-                        ...(hasNonEmptyValue(m.phone) ? { phone: m.phone } : {}),
-                        ...(hasNonEmptyValue(m.institution) ? { institution: m.institution } : {}),
-                    }
-
-                    participant = await tx.participant.update({
-                        where: { id: existingParticipant.id },
-                        data: participantPatch,
-                        include: { user: true },
-                    })
-                } else {
-                    const user = existingUser ?? await tx.user.create({
+                if (!user) {
+                    user = await tx.user.create({
                         data: { email: m.email, type: 'PARTICIPANT' },
                     })
-
-                    participant = await tx.participant.create({
-                        data: {
-                            userId:      user.id,
-                            cnic:        normalizedCnic,
-                            email:       m.email,
-                            fullName:    m.fullName,
-                            phone:       m.phone || null,
-                            institution: m.institution || null,
-                        },
-                        include: { user: true },
-                    })
                 }
+
+                participant = await tx.participant.create({
+                    data: {
+                        userId:      user.id,
+                        cnic:        m.cnic,
+                        email:       m.email,
+                        fullName:    m.fullName,
+                        phone:       m.phone || null,
+                        institution: m.institution || null,
+                    },
+                    include: { user: true },
+                })
             }
 
             participantIds.push({ participantId: participant.id, isLeader: m.isLeader })
@@ -633,59 +576,18 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
         })
 
         return team
-        }, { timeout: 15000 })
+    })
 
-        res.status(201).json({
-            success: true,
-            data: {
-                id:          result.id,
-                name:        result.name,
-                referenceId: result.referenceId,
-                competition: result.competition.name,
-                memberCount: result._count.members,
-            },
-        })
-    } catch (error: any) {
-        if (error?.code === 'BA_CODE_INVALID' || String(error?.message || '') === 'BA_CODE_INVALID') {
-            res.status(400).json({ success: false, message: 'BA Code is invalid.' })
-            return
-        }
-
-        if (error?.code === 'EARLY_BIRD_FULL' || String(error?.message || '') === 'EARLY_BIRD_FULL') {
-            res.status(409).json({
-                success: false,
-                message: 'Early Bird seats are full. Please register without Early Bird and pay the full amount.',
-            })
-            return
-        }
-
-        if (error?.code === 'CAPACITY_FULL' || String(error?.message || '') === 'CAPACITY_FULL') {
-            res.status(409).json({ success: false, message: 'Module seats are full. Please register for a different module.' })
-            return
-        }
-
-        if (error?.code === 'CNIC_TAKEN' || error?.message?.startsWith('CNIC_TAKEN:')) {
-            const cnic = error?.message?.split(':')[1] || 'this CNIC'
-            res.status(400).json({
-                success: false,
-                message: `CNIC ${cnic} is already registered to another participant.`,
-            })
-            return
-        }
-
-        if ((error?.code as string) === 'P2002') {
-            const target = (error?.meta?.target as string[]) || []
-            const field = target[0] || 'record'
-            res.status(409).json({
-                success: false,
-                message: `Duplicate entry: ${field} already exists.`,
-            })
-            return
-        }
-
-        const message = error?.message || 'Failed to create registration.'
-        res.status(500).json({ success: false, message })
-    }
+    res.status(201).json({
+        success: true,
+        data: {
+            id:          result.id,
+            name:        result.name,
+            referenceId: result.referenceId,
+            competition: result.competition.name,
+            memberCount: result._count.members,
+        },
+    })
 }
 
 //  GET /registrations/search?q=<query>

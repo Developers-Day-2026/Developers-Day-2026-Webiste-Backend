@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase'
 
 export interface AuthRequest extends Request {
     userId?: string
+    userEmail?: string
     userRole?: string
 }
 
@@ -14,13 +15,23 @@ export interface AuthRequest extends Request {
 
 interface CachedAuth {
     userId: string
+    userEmail: string | undefined
     userRole: string | undefined
     cachedAt: number
 }
 
+function readPositiveIntEnv(name: string, fallback: number): number {
+    const raw = process.env[name]
+    if (!raw) return fallback
+    const parsed = Number.parseInt(raw, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
 const tokenCache   = new Map<string, CachedAuth>()
-const TOKEN_CACHE_TTL_MS  = 2 * 60 * 1000   // 2 minutes
-const TOKEN_CACHE_MAX     = 500              // cap to prevent unbounded growth
+// A slightly longer default TTL reduces repeated Supabase verification trips
+// while keeping revocation lag bounded. Override via env when needed.
+const TOKEN_CACHE_TTL_MS  = readPositiveIntEnv('TOKEN_CACHE_TTL_MS', 5 * 60 * 1000)
+const TOKEN_CACHE_MAX     = readPositiveIntEnv('TOKEN_CACHE_MAX', 500)
 
 let lastCleanup = Date.now()
 function pruneExpired() {
@@ -50,6 +61,7 @@ export async function requireAuth(
     const cached = tokenCache.get(token)
     if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
         req.userId   = cached.userId
+        req.userEmail = cached.userEmail
         req.userRole = cached.userRole
         next()
         return
@@ -65,6 +77,7 @@ export async function requireAuth(
     }
 
     const userId   = data.user.id
+    const userEmail = data.user.email ?? undefined
     const userRole = ((data.user.app_metadata?.role as string) ?? '').toUpperCase() || undefined
 
     // Evict oldest entry if at capacity
@@ -72,9 +85,10 @@ export async function requireAuth(
         const oldest = tokenCache.keys().next().value
         if (oldest) tokenCache.delete(oldest)
     }
-    tokenCache.set(token, { userId, userRole, cachedAt: Date.now() })
+    tokenCache.set(token, { userId, userEmail, userRole, cachedAt: Date.now() })
 
     req.userId   = userId
+    req.userEmail = userEmail
     req.userRole = userRole
     next()
 }
