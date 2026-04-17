@@ -61,9 +61,19 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
             skip,
             take: limit,
             orderBy: { createdAt: 'desc' },
-            include: {
-                competition: { select: { id: true, name: true, compDay: true, fee: true, earlyBirdFee: true } },
-                _count:      { select: { members: true } },
+            select: {
+                id:              true,
+                name:            true,
+                referenceId:     true,
+                paymentStatus:   true,
+                paymentMethod:   true,
+                paymentProofUrl: true,
+                isEarlyBird:     true,
+                createdAt:       true,
+                competition: {
+                    select: { id: true, name: true, compDay: true, fee: true, earlyBirdFee: true },
+                },
+                _count: { select: { members: true } },
                 members: {
                     select: {
                         teamEmailsQueue: {
