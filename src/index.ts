@@ -69,12 +69,16 @@ import competitionRoutes from './routes/competition.routes'
 import ambassadorRoutes from './routes/ambassador.routes'
 import participantRoutes from './routes/participant.routes'
 import webRegistrationRoutes from './routes/web-registration.routes'
+import stallRoutes from './routes/stall.routes'
+import companyRoutes from './routes/company.routes'
 app.use('/auth', authRoutes)
 app.use('/users', userRoutes)
 app.use('/registrations', registrationRoutes)
 app.use('/competitions', competitionRoutes)
 app.use('/ambassadors', ambassadorRoutes)
 app.use('/participants', participantRoutes)
+app.use('/stalls', stallRoutes)
+app.use('/companies', companyRoutes)
 app.use('/public/registrations', webRegistrationRoutes)
 
 app.get("/", (_req: Request, res: Response) => {
