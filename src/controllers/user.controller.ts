@@ -9,6 +9,7 @@ import {
     ActionEnum,
     invalidateUserActionsCache,
 } from '../utils/actions'
+import { cacheDelete } from '../utils/dataCache'
 
 // ─── GET /users — list all staff users ───────────────────────────────────────
 
@@ -120,6 +121,7 @@ export async function updateUserActions(req: AuthRequest, res: Response): Promis
 
     // Bust the permission cache so the user picks up new actions immediately
     invalidateUserActionsCache(id)
+    cacheDelete(`auth:profile:${id}`)
 
     const effective = [...new Set([...roleDefaults, ...extraOnly])]
 

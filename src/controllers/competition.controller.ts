@@ -2,6 +2,10 @@ import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { prisma } from '../config/db'
 import { buildCompetitionCategoryMap } from '../utils/competitionsCsv'
+import { cacheGet, cacheSet, cacheDelete } from '../utils/dataCache'
+
+const TTL_COMP_LIST = 5 * 60 * 1000   // 5 min — admin list (venues, counts)
+const TTL_COMP_PUBLIC = 5 * 60 * 1000 // 5 min — public list changes rarely
 
 // Fixed venues list (seeded in DB)
 export const LAB_VENUES = ['LAB 1', 'LAB 2', 'LAB 3', 'LAB 4', 'LAB 5', 'LAB 6']
@@ -9,6 +13,11 @@ export const LAB_VENUES = ['LAB 1', 'LAB 2', 'LAB 3', 'LAB 4', 'LAB 5', 'LAB 6']
 // GET /competitions — list all competitions
 
 export async function listCompetitions(_req: AuthRequest, res: Response): Promise<void> {
+    const cached = cacheGet<unknown[]>('comp:list')
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
     const competitions = await prisma.competition.findMany({
         include: {
             venues: { select: { name: true } },
@@ -17,25 +26,24 @@ export async function listCompetitions(_req: AuthRequest, res: Response): Promis
         orderBy: [{ compDay: 'asc' }, { startTime: 'asc' }],
     })
 
-    res.json({
-        success: true,
-        data: competitions.map((c) => ({
-            id:                   c.id,
-            name:                 c.name,
-            description:          c.description ?? null,
-            venues:               c.venues.map((v) => v.name),
-            fee:                  Number(c.fee),
-            minTeamSize:          c.minTeamSize,
-            maxTeamSize:          c.maxTeamSize,
-            capacityLimit:        c.capacityLimit,
-            registeredTeams:      c._count.teams,
-            compDay:              c.compDay.toISOString(),
-            startTime:            c.startTime.toISOString(),
-            endTime:              c.endTime.toISOString(),
-            isActive:             c.isActive,
-            registrationDeadline: c.registrationDeadline?.toISOString() ?? null,
-        })),
-    })
+    const list = competitions.map((c) => ({
+        id:                   c.id,
+        name:                 c.name,
+        description:          c.description ?? null,
+        venues:               c.venues.map((v) => v.name),
+        fee:                  Number(c.fee),
+        minTeamSize:          c.minTeamSize,
+        maxTeamSize:          c.maxTeamSize,
+        capacityLimit:        c.capacityLimit,
+        registeredTeams:      c._count.teams,
+        compDay:              c.compDay.toISOString(),
+        startTime:            c.startTime.toISOString(),
+        endTime:              c.endTime.toISOString(),
+        isActive:             c.isActive,
+        registrationDeadline: c.registrationDeadline?.toISOString() ?? null,
+    }))
+    cacheSet('comp:list', list, TTL_COMP_LIST)
+    res.json({ success: true, data: list })
 }
 
 // GET /competitions/public — list competitions with category (no auth)
@@ -50,29 +58,33 @@ function getCategoryMap(): Map<string, string> {
 }
 
 export async function listCompetitionsWithCategory(_req: Request, res: Response): Promise<void> {
+    const cached = cacheGet<unknown[]>('comp:public')
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
     const competitions = await prisma.competition.findMany({
         orderBy: [{ name: 'asc' }],
     })
 
     // const categoryMap = getCategoryMap()
-    res.json({
-        success: true,
-        data: competitions.map((c) => ({
-            id:          c.id,
-            name:        c.name,
-            category:    String(c.category ?? ''),
-            description: c.description ?? null,
-            fee:         Number(c.fee),
-            capacityLimit: c.capacityLimit,
-            earlyBirdFee:   Number(c.earlyBirdFee),
-            earlyBirdLimit: c.earlyBirdLimit,
-            ruleBookUrl:    c.ruleBookUrl,
-            minTeamSize: c.minTeamSize,
-            maxTeamSize: c.maxTeamSize,
-            startTime: c.startTime ? c.startTime.toISOString() : null,
-            endTime: c.endTime ? c.endTime.toISOString() : null,
-        })),
-    })
+    const list = competitions.map((c) => ({
+        id:          c.id,
+        name:        c.name,
+        category:    String(c.category ?? ''),
+        description: c.description ?? null,
+        fee:         Number(c.fee),
+        capacityLimit: c.capacityLimit,
+        earlyBirdFee:   Number(c.earlyBirdFee),
+        earlyBirdLimit: c.earlyBirdLimit,
+        ruleBookUrl:    c.ruleBookUrl,
+        minTeamSize: c.minTeamSize,
+        maxTeamSize: c.maxTeamSize,
+        startTime: c.startTime ? c.startTime.toISOString() : null,
+        endTime: c.endTime ? c.endTime.toISOString() : null,
+    }))
+    cacheSet('comp:public', list, TTL_COMP_PUBLIC)
+    res.json({ success: true, data: list })
 }
 
 // GET /competitions/public/:id — public competition detail (no auth)
@@ -156,6 +168,9 @@ export async function updateCompetitionTime(req: AuthRequest, res: Response): Pr
         data:  { startTime: start, endTime: end },
     })
 
+    cacheDelete('comp:list')
+    cacheDelete('comp:public')
+
     res.json({
         success: true,
         message: 'Competition time updated successfully.',
@@ -193,6 +208,9 @@ export async function updateCompetitionVenues(req: AuthRequest, res: Response): 
         data:    { venues: { set: venueRecords.map((v) => ({ id: v.id })) } },
         include: { venues: { select: { name: true } } },
     })
+
+    cacheDelete('comp:list')
+    cacheDelete('comp:public')
 
     res.json({
         success: true,
