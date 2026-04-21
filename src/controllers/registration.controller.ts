@@ -3,6 +3,13 @@ import { AuthRequest } from '../middleware/auth'
 import { prisma } from '../config/db'
 import { Prisma, RegistrationStatus, PaymentMethod, AttendanceMethod } from '@prisma/client'
 import { z } from 'zod'
+import { cacheGet, cacheSet, cacheDelete, cacheDeletePrefix } from '../utils/dataCache'
+
+// Cache TTLs
+const TTL_COMPETITIONS  = 5 * 60 * 1000   // 5 min  — competition list changes rarely
+const TTL_DASHBOARD     = 30 * 1000        // 30 sec — live-ish aggregate stats
+const TTL_REG_LIST      = 30 * 1000        // 30 sec — paged registration list
+const TTL_REG_DETAIL    = 60 * 1000        // 60 sec — single registration detail
 
 
 function normalizeCnic(value: string): string {
@@ -13,10 +20,16 @@ function normalizeCnic(value: string): string {
 // GET /registrations/competitions 
 
 export async function listCompetitions(_req: AuthRequest, res: Response): Promise<void> {
+    const cached = cacheGet<unknown[]>('reg:competitions')
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
     const competitions = await prisma.competition.findMany({
         select: { id: true, name: true, compDay: true, minTeamSize: true, maxTeamSize: true },
         orderBy: { name: 'asc' },
     })
+    cacheSet('reg:competitions', competitions, TTL_COMPETITIONS)
     res.json({ success: true, data: competitions })
 }
 
@@ -31,6 +44,14 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
     const search        = (req.query.search        as string)?.trim() ?? ''
     const competitionId = (req.query.competitionId as string)?.trim() || undefined
     const statusParam   = (req.query.status        as string)?.trim() || undefined
+
+    // ── Cache lookup (keyed by all query params) ────────────────────────────
+    const cacheKey = `reg:list:${page}:${limit}:${search}:${competitionId ?? ''}:${statusParam ?? ''}`
+    const cached = cacheGet<{ data: unknown[]; meta: unknown }>(cacheKey)
+    if (cached) {
+        res.json({ success: true, ...cached })
+        return
+    }
 
     // Build where clause
     const where: Prisma.TeamWhereInput = {}
@@ -64,8 +85,7 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
         }),
     ])
 
-    res.json({
-        success: true,
+    const payload = {
         data: teams.map((t) => ({
             id:            t.id,
             name:          t.name,
@@ -82,133 +102,148 @@ export async function listRegistrations(req: AuthRequest, res: Response): Promis
             limit,
             totalPages: Math.ceil(total / limit),
         },
-    })
-}
+    }
+    cacheSet(cacheKey, payload, TTL_REG_LIST)
+    res.json({ success: true, ...payload })
+} 
 
-// GET /registrations/:id 
+// GET /registrations/:id
 
 export async function getRegistration(req: AuthRequest, res: Response): Promise<void> {
     const id = String(req.params.id)
 
-    // ── Step 1: Load team + competition + members in ONE query ─────────────────
-    // Do NOT nest teamEmailsQueue here — Prisma issues one query per member when
-    // `take` is used on a nested to-many, causing an N+1 against Supabase.
-    const team = await prisma.team.findUnique({
-        where: { id },
-        select: {
-            id:              true,
-            name:            true,
-            referenceId:     true,
-            paymentStatus:   true,
-            paymentMethod:   true,
-            paymentDate:     true,
-            declaredTID:     true,
-            amountPaid:      true,
-            paymentProofUrl: true,
-            createdAt:       true,
-            updatedAt:       true,
-            competition: {
-                select: {
-                    id:          true,
-                    name:        true,
-                    compDay:     true,
-                    fee:         true,
-                    minTeamSize: true,
-                    maxTeamSize: true,
-                },
-            },
-            members: {
-                select: {
-                    id:           true,
-                    isLeader:     true,
-                    cardIssued:   true,
-                    cardIssuedAt: true,
-                    joinedAt:     true,
-                    participantId: true,
-                    participant: {
-                        select: {
-                            id:          true,
-                            fullName:    true,
-                            email:       true,
-                            cnic:        true,
-                            phone:       true,
-                            institution: true,
-                        },
-                    },
-                },
-                orderBy: { isLeader: 'desc' },
-            },
-        },
-    })
+    // ── Cache lookup ────────────────────────────────────────────────────────
+    const cached = cacheGet<unknown>(`reg:detail:${id}`)
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
 
-    if (!team) {
+    // ── Single JOIN query — 1 connection, 1 round trip to Supabase ────────────
+    // With connection_limit=1 on Vercel, Promise.all still serialises through
+    // the single Prisma connection; a raw JOIN fetches everything at once.
+    type Row = {
+        id: string; name: string; reference_id: string
+        payment_status: string; payment_method: string | null
+        payment_date: Date | null; declared_tid: string | null
+        amount_paid: string | null; payment_proof_url: string | null
+        created_at: Date; updated_at: Date
+        comp_id: string; comp_name: string; comp_day: number | null
+        fee: string | null; min_team_size: number; max_team_size: number
+        member_id: string | null; is_leader: boolean | null
+        card_issued: boolean | null; card_issued_at: Date | null
+        joined_at: Date | null; participant_id: string | null
+        p_id: string | null; full_name: string | null
+        p_email: string | null; cnic: string | null
+        phone: string | null; institution: string | null
+        att_status: boolean | null; att_method: string | null
+        att_marked_at: Date | null
+        note_rejection: string | null; note_on_hold: string | null
+    }
+
+    const rows = await prisma.$queryRaw<Row[]>`
+        SELECT
+          t.id, t.name, t."referenceId"       AS reference_id,
+          t."paymentStatus"                   AS payment_status,
+          t."paymentMethod"                   AS payment_method,
+          t."paymentDate"                     AS payment_date,
+          t."declaredTID"                     AS declared_tid,
+          t."amountPaid"::text                AS amount_paid,
+          t."paymentProofUrl"                 AS payment_proof_url,
+          t."createdAt"                       AS created_at,
+          t."updatedAt"                       AS updated_at,
+          c.id                                AS comp_id,
+          c.name                              AS comp_name,
+          c."compDay"                         AS comp_day,
+          c.fee::text                         AS fee,
+          c."minTeamSize"                     AS min_team_size,
+          c."maxTeamSize"                     AS max_team_size,
+          tm.id                               AS member_id,
+          tm."isLeader"                       AS is_leader,
+          tm."cardIssued"                     AS card_issued,
+          tm."cardIssuedAt"                   AS card_issued_at,
+          tm."joinedAt"                       AS joined_at,
+          tm."participantId"                  AS participant_id,
+          p.id                                AS p_id,
+          p."fullName"                        AS full_name,
+          p.email                             AS p_email,
+          p.cnic, p.phone, p.institution,
+          ca.status                           AS att_status,
+          ca.method                           AS att_method,
+          ca."markedAt"                       AS att_marked_at,
+          teq."noteRejection"                 AS note_rejection,
+          teq."noteOnHold"                    AS note_on_hold
+        FROM "Team" t
+        JOIN  "Competition"          c   ON c.id              = t."competitionId"
+        LEFT JOIN "TeamMember"       tm  ON tm."teamId"        = t.id
+        LEFT JOIN "Participant"      p   ON p.id               = tm."participantId"
+        LEFT JOIN "CompetitionAttendance" ca
+                                         ON ca."teamId"        = t.id
+                                        AND ca."participantId" = tm."participantId"
+        LEFT JOIN "TeamEmailsQueue"  teq ON teq."teamMemberId" = tm.id
+        WHERE t.id = ${id}
+        ORDER BY tm."isLeader" DESC NULLS LAST
+    `
+
+    if (rows.length === 0) {
         res.status(404).json({ success: false, message: 'Registration not found.' })
         return
     }
 
-    const memberIds = team.members.map((m) => m.id)
+    const r0 = rows[0]
 
-    // ── Step 2: Parallel queries — no more sequential round-trips ──────────────
-    const [attendanceRecords, queueEntries] = await Promise.all([
-        prisma.competitionAttendance.findMany({
-            where: { teamId: id },
-            select: {
-                participantId: true,
-                status:        true,
-                method:        true,
-                markedAt:      true,
-            },
-        }),
-        memberIds.length > 0
-            ? prisma.teamEmailsQueue.findMany({
-                  where: { teamMemberId: { in: memberIds } },
-                  select: { noteRejection: true, noteOnHold: true },
-                  take: 1,
-              })
-            : Promise.resolve([]),
-    ])
+    // First non-null note from any queue entry
+    let note: string | null = null
+    for (const r of rows) {
+        const n = r.note_rejection || r.note_on_hold || null
+        if (n) { note = n; break }
+    }
 
-    const queueEntry = queueEntries[0]
-    const note = queueEntry
-        ? queueEntry.noteRejection || queueEntry.noteOnHold || ''
-        : null
-
-    const attendanceByParticipantId = new Map(
-        attendanceRecords.map((record) => [record.participantId, record])
-    )
-
-    res.json({
-        success: true,
-        data: {
-            id:              team.id,
-            name:            team.name,
-            referenceId:     team.referenceId,
-            paymentStatus:   team.paymentStatus,
-            paymentMethod:   team.paymentMethod,
-            paymentDate:     team.paymentDate,
-            declaredTID:     team.declaredTID,
-            amountPaid:      team.amountPaid ? String(team.amountPaid) : null,
-            paymentProofUrl: team.paymentProofUrl,
-            createdAt:       team.createdAt,
-            updatedAt:       team.updatedAt,
-            competition:     team.competition,
-            note,
-            members: team.members.map((m) => {
-                const att = attendanceByParticipantId.get(m.participantId)
-                return {
-                    id:           m.id,
-                    isLeader:     m.isLeader,
-                    cardIssued:   m.cardIssued,
-                    cardIssuedAt: m.cardIssuedAt,
-                    joinedAt:     m.joinedAt,
-                    participant:  m.participant,
-                    attendance: att
-                        ? { status: att.status, method: att.method, markedAt: att.markedAt }
-                        : null,
-                }
-            }),
+    const detail = {
+        id:              r0.id,
+        name:            r0.name,
+        referenceId:     r0.reference_id,
+        paymentStatus:   r0.payment_status,
+        paymentMethod:   r0.payment_method,
+        paymentDate:     r0.payment_date,
+        declaredTID:     r0.declared_tid,
+        amountPaid:      r0.amount_paid,
+        paymentProofUrl: r0.payment_proof_url,
+        createdAt:       r0.created_at,
+        updatedAt:       r0.updated_at,
+        competition: {
+            id:          r0.comp_id,
+            name:        r0.comp_name,
+            compDay:     r0.comp_day,
+            fee:         r0.fee,
+            minTeamSize: r0.min_team_size,
+            maxTeamSize: r0.max_team_size,
         },
-    })
+        note,
+        members: rows
+            .filter((r) => r.member_id !== null)
+            .map((r) => ({
+                id:           r.member_id!,
+                isLeader:     r.is_leader,
+                cardIssued:   r.card_issued,
+                cardIssuedAt: r.card_issued_at,
+                joinedAt:     r.joined_at,
+                participant: {
+                    id:          r.p_id,
+                    fullName:    r.full_name,
+                    email:       r.p_email,
+                    cnic:        r.cnic,
+                    phone:       r.phone,
+                    institution: r.institution,
+                },
+                attendance: r.att_status !== null
+                    ? { status: r.att_status, method: r.att_method, markedAt: r.att_marked_at }
+                    : null,
+            })),
+    }
+
+    cacheSet(`reg:detail:${id}`, detail, TTL_REG_DETAIL)
+    res.json({ success: true, data: detail })
 }
 
 const paymentStatusUpdateSchema = z.object({
@@ -259,6 +294,11 @@ export async function updateTeamPaymentStatus(req: AuthRequest, res: Response): 
 
     })
 
+    // ── Invalidate stale caches ─────────────────────────────────────────────
+    cacheDelete(`reg:detail:${teamId}`)
+    cacheDeletePrefix('reg:list:')
+    cacheDelete('reg:dashboard_stats')
+
     res.json({
         success: true,
         data: {
@@ -272,6 +312,11 @@ export async function updateTeamPaymentStatus(req: AuthRequest, res: Response): 
 //  GET /registrations/competitions-form
 
 export async function listCompetitionsForForm(_req: AuthRequest, res: Response): Promise<void> {
+    const cached = cacheGet<unknown[]>('reg:competitions_form')
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
     const competitions = await prisma.competition.findMany({
         select: {
             id: true, name: true, compDay: true, fee: true,
@@ -281,6 +326,7 @@ export async function listCompetitionsForForm(_req: AuthRequest, res: Response):
         },
         orderBy: { name: 'asc' },
     })
+    cacheSet('reg:competitions_form', competitions, TTL_COMPETITIONS)
     res.json({ success: true, data: competitions })
 }
 
@@ -578,6 +624,14 @@ export async function createRegistration(req: AuthRequest, res: Response): Promi
         return team
     })
 
+    // Invalidate list + dashboard stats; competition capacity changed too
+    cacheDeletePrefix('reg:list:')
+    cacheDelete('reg:dashboard_stats')
+    cacheDelete('reg:competitions')
+    cacheDelete('reg:competitions_form')
+    cacheDelete('comp:list')
+    cacheDelete('comp:public')
+
     res.status(201).json({
         success: true,
         data: {
@@ -779,6 +833,10 @@ export async function markTeamAttendance(req: AuthRequest, res: Response): Promi
         return attendanceRecords
     })
 
+    // Invalidate the cached registration detail so attendance is reflected
+    cacheDelete(`reg:detail:${teamId}`)
+    cacheDelete('reg:dashboard_stats')
+
     res.json({
         success: true,
         message: `Attendance marked for ${result.length} team member(s).`,
@@ -899,6 +957,10 @@ export async function changeTeamCompetition(req: AuthRequest, res: Response): Pr
         data:  { competitionId: newCompetitionId },
     })
 
+    cacheDelete(`reg:detail:${teamId}`)
+    cacheDeletePrefix('reg:list:')
+    cacheDelete('reg:dashboard_stats')
+
     res.json({
         success: true,
         message: `Team moved to "${newComp.name}" successfully.`,
@@ -909,6 +971,12 @@ export async function changeTeamCompetition(req: AuthRequest, res: Response): Pr
 // GET /registrations/dashboard-stats
 
 export async function getDashboardStats(_req: AuthRequest, res: Response): Promise<void> {
+    const cached = cacheGet<unknown>('reg:dashboard_stats')
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
+
     // Get all stats in parallel
     const [
         totalRegistrations,
@@ -944,13 +1012,12 @@ export async function getDashboardStats(_req: AuthRequest, res: Response): Promi
         ? Math.round((attendedParticipants / totalParticipants) * 100)
         : 0
 
-    res.json({
-        success: true,
-        data: {
-            totalRegistrations,
-            verifiedPayments,
-            pendingPayments,
-            attendancePercentage,
-        },
-    })
+    const stats = {
+        totalRegistrations,
+        verifiedPayments,
+        pendingPayments,
+        attendancePercentage,
+    }
+    cacheSet('reg:dashboard_stats', stats, TTL_DASHBOARD)
+    res.json({ success: true, data: stats })
 }

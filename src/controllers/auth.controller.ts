@@ -5,6 +5,13 @@ import { supabaseAdmin, supabasePublic } from '../config/supabase'
 import { deriveNuId } from '../utils/nuId'
 import { StaffRole, UserType } from '@prisma/client'
 import { ROLE_DEFAULT_ACTIONS, actionsToKebab } from '../utils/actions'
+import { cacheGet, cacheSet, cacheDelete } from '../utils/dataCache'
+
+const TTL_USER_PROFILE = 5 * 60 * 1000  // 5 min — same as actions cache TTL
+
+function userProfileCacheKey(userId: string): string {
+    return `auth:profile:${userId}`
+}
 
 export async function refreshToken(req: Request, res: Response): Promise<void> {
     const { refreshToken: token } = req.body as { refreshToken?: string }
@@ -151,6 +158,13 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
         return
     }
 
+    // ── Cache hit ───────────────────────────────────────────────────────────
+    const cached = cacheGet<unknown>(userProfileCacheKey(userId))
+    if (cached) {
+        res.json({ success: true, data: cached })
+        return
+    }
+
     let prismaUser = await prisma.user.findUnique({
         where: { id: userId },
         include: { staffProfile: true, grantedActions: true },
@@ -173,19 +187,18 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
     const extraEnums   = prismaUser.grantedActions.map((a) => a.action)
     const effective    = [...new Set([...roleDefaults, ...extraEnums])]
 
-    res.json({
-        success: true,
-        data: {
-            id:         prismaUser.id,
-            email:      prismaUser.email,
-            type:       prismaUser.type,
-            nuId:       prismaUser.staffProfile?.nuId       ?? null,
-            fullName:   prismaUser.staffProfile?.fullName   ?? null,
-            staffRole:  prismaUser.staffProfile?.staffRole  ?? null,
-            isApproved: prismaUser.staffProfile?.isApproved ?? null,
-            actions:    actionsToKebab(effective),
-        },
-    })
+    const profile = {
+        id:         prismaUser.id,
+        email:      prismaUser.email,
+        type:       prismaUser.type,
+        nuId:       prismaUser.staffProfile?.nuId       ?? null,
+        fullName:   prismaUser.staffProfile?.fullName   ?? null,
+        staffRole:  prismaUser.staffProfile?.staffRole  ?? null,
+        isApproved: prismaUser.staffProfile?.isApproved ?? null,
+        actions:    actionsToKebab(effective),
+    }
+    cacheSet(userProfileCacheKey(prismaUser.id), profile, TTL_USER_PROFILE)
+    res.json({ success: true, data: profile })
 }
 
 // for register
