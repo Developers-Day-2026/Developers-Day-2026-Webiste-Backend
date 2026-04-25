@@ -51,6 +51,7 @@ function getCategoryMap(): Map<string, string> {
 
 export async function listCompetitionsWithCategory(_req: Request, res: Response): Promise<void> {
     const competitions = await prisma.competition.findMany({
+        where: { isActive: true },
         orderBy: [{ name: 'asc' }],
     })
 
