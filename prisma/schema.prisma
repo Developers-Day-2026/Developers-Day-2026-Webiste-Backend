@@ -224,6 +224,7 @@ model Competition {
   startTime            DateTime
   endTime              DateTime
   isActive             Boolean   @default(true)
+  isLaptopRequired     Boolean   @default(false)
   registrationDeadline DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -476,6 +477,9 @@ enum RegistrationStatus {
   VERIFIED
   FREE
   ONHOLD
+  WITHDRAWN
+  DISSOLVED
+  REFUNDED 
   REJECTED
 }
 
