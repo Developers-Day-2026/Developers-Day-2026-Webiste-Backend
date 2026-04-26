@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import { startEmailQueueWorker } from './workers/emailQueueWorker';
 
 dotenv.config();
 
@@ -11,6 +12,9 @@ const port = process.env.PORT || 3000;
 // Connect to Databas
 import { connectDB, disconnectDB } from "./config/db";
 connectDB();
+
+// Start Background Workers
+startEmailQueueWorker();
 
 const frontendOrigin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL;
 
