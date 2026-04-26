@@ -71,6 +71,7 @@ import participantRoutes from './routes/participant.routes'
 import webRegistrationRoutes from './routes/web-registration.routes'
 import stallRoutes from './routes/stall.routes'
 import companyRoutes from './routes/company.routes'
+import prQueryRoutes from './routes/prQuery.routes'
 app.use('/auth', authRoutes)
 app.use('/users', userRoutes)
 app.use('/registrations', registrationRoutes)
@@ -80,6 +81,7 @@ app.use('/participants', participantRoutes)
 app.use('/stalls', stallRoutes)
 app.use('/companies', companyRoutes)
 app.use('/public/registrations', webRegistrationRoutes)
+app.use('/pr-queries', prQueryRoutes)
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("Express + TypeScript Server");
