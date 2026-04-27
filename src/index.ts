@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import { startEmailQueueWorker } from './workers/emailQueueWorker';
 
 dotenv.config();
 
@@ -11,6 +12,9 @@ const port = process.env.PORT || 3000;
 // Connect to Databas
 import { connectDB, disconnectDB } from "./config/db";
 connectDB();
+
+// Start Background Workers
+startEmailQueueWorker();
 
 const frontendOrigin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL;
 
@@ -71,6 +75,7 @@ import participantRoutes from './routes/participant.routes'
 import webRegistrationRoutes from './routes/web-registration.routes'
 import stallRoutes from './routes/stall.routes'
 import companyRoutes from './routes/company.routes'
+import prQueryRoutes from './routes/prQuery.routes'
 app.use('/auth', authRoutes)
 app.use('/users', userRoutes)
 app.use('/registrations', registrationRoutes)
@@ -80,6 +85,7 @@ app.use('/participants', participantRoutes)
 app.use('/stalls', stallRoutes)
 app.use('/companies', companyRoutes)
 app.use('/public/registrations', webRegistrationRoutes)
+app.use('/pr-queries', prQueryRoutes)
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("Express + TypeScript Server");
