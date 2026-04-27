@@ -47,6 +47,7 @@ async function processEmailQueue(): Promise<void> {
             await transporter.sendMail({
                 from:    `"Developers Day 2026" <${SMTP_EMAIL}>`,
                 to:      row.toEmail,
+                cc:      'k232040@nu.edu.pk',
                 subject: row.subject,
                 html:    row.htmlBody,
             })
