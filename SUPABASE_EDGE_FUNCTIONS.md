@@ -59,3 +59,67 @@ curl -X POST \
 ### Response Summary
 
 The function returns counts for created/updated activities and created/skipped completions.
+
+## minigame-activity-sync
+
+Path: `supabase/functions/minigame-activity-sync/index.ts`
+
+This function manages minigame participation activities and points completions.
+
+It uses SQL functions for atomic writes:
+
+- `public.grant_minigame_activity_completion(...)`
+- `public.revoke_minigame_activity_completion(...)`
+
+Deferred SQL (manual apply for now):
+
+- `supabase/functions/minigame-activity-sync/minigame-participation-rpc.sql.txt`
+
+### Actions
+
+- `sync_activities`
+- `sync_completions`
+- `sync_prune`
+- `sync_all` (default)
+
+### Config Resolution
+
+Minigame activity points use this order:
+
+1. `MasterConfig` override (`key = MINIGAME_ACTIVITY_POINTS_OVERRIDE__<minigameId>`)
+2. `MasterConfig` global default (`key = MINIGAME_ACTIVITY_POINTS`)
+3. Fallback default from function env `MINIGAME_ACTIVITY_POINTS_FALLBACK` (default `5`)
+
+### Required Environment Variables
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SYSTEM_STAFF_PROFILE_ID` (recommended; optional if at least one approved staff profile exists)
+
+### Optional Environment Variables
+
+- `EDGE_FUNCTION_TOKEN` (if set, request must include `Authorization: Bearer <token>`)
+- `MINIGAME_ACTIVITY_POINTS_FALLBACK` (integer; default `5`)
+- `EDGE_SYNC_BATCH_SIZE` (integer; default `10`)
+
+### Request Example
+
+```json
+{
+  "action": "sync_all"
+}
+```
+
+### cURL Example
+
+```bash
+curl -X POST \
+  "https://<project-ref>.supabase.co/functions/v1/minigame-activity-sync" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <EDGE_FUNCTION_TOKEN>" \
+  -d '{"action":"sync_all"}'
+```
+
+### Response Summary
+
+The function returns counts for created/updated activities and created/skipped/pruned completions.
