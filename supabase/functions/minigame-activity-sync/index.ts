@@ -199,14 +199,18 @@ async function loadConfigPoints(): Promise<{ globalDefault: number | null; overr
 async function loadMinigames(): Promise<MinigameRow[]> {
   const result = await supabase
     .from("Minigame")
-    .select("id, name, isActive")
+    .select("id, name, is_active")
     .order("name", { ascending: true })
 
   if (result.error) {
     throw new Error(`Could not load minigames: ${result.error.message}`)
   }
 
-  return result.data || []
+  return (result.data || []).map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    isActive: Boolean(row.is_active),
+  }))
 }
 
 async function syncActivities(
@@ -319,7 +323,7 @@ async function syncActivities(
 async function loadEligibleParticipantMinigamePairs(): Promise<ParticipantMinigamePair[]> {
   const scoresResult = await supabase
     .from("Score")
-    .select("userCode, gameId")
+    .select("user_code, game_id")
 
   if (scoresResult.error) {
     throw new Error(`Could not load scores: ${scoresResult.error.message}`)
@@ -327,10 +331,13 @@ async function loadEligibleParticipantMinigamePairs(): Promise<ParticipantMiniga
 
   const uniqueScores = new Map<string, { userCode: string; gameId: string }>()
   for (const row of scoresResult.data || []) {
-    if (!row.userCode || !row.gameId) continue
-    const key = `${row.userCode}:${row.gameId}`
+    const userCode = row.user_code
+    const gameId = row.game_id
+
+    if (!userCode || !gameId) continue
+    const key = `${userCode}:${gameId}`
     if (!uniqueScores.has(key)) {
-      uniqueScores.set(key, { userCode: row.userCode, gameId: row.gameId })
+      uniqueScores.set(key, { userCode, gameId })
     }
   }
 
