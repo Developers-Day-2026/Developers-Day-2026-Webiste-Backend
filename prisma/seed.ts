@@ -40,7 +40,7 @@ async function main() {
             create: {
                 id,
                 name:        row.name,
-                description: row.description || null,
+                description: row.description || undefined,
                 fee:         row.normalPrice || row.earlyBirdPrice || 0,
                 minTeamSize: min,
                 maxTeamSize: max,
@@ -51,7 +51,7 @@ async function main() {
                 registrationDeadline: new Date('2026-03-10T23:59:00'),
             },
             update: {
-                description: row.description || null,
+                description: row.description || undefined,
                 fee:         row.normalPrice || row.earlyBirdPrice || 0,
                 minTeamSize: min,
                 maxTeamSize: max,

@@ -41,7 +41,12 @@ function generateReferralCode(): string {
 }
 
 function generateMinigameCode(): string {
-    return `MG${Math.random().toString(36).substr(2, 10).toUpperCase()}`
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    let code = ''
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return code
 }
 
 const institutions = [
@@ -145,13 +150,10 @@ async function main() {
                 { name: 'Seminar Room 1', location: 'Building 2, Floor 1', capacity: 100 },
                 { name: 'Seminar Room 2', location: 'Building 2, Floor 2', capacity: 100 },
                 { name: 'Workshop Area', location: 'Building 3, Ground Floor', capacity: 200 },
-            ].map(v =>
-                prisma.venue.upsert({
-                    where: { name: v.name },
-                    create: v,
-                    update: {},
-                })
-            )
+            ].map(async (v) => {
+                const existing = await prisma.venue.findFirst({ where: { name: v.name } })
+                return existing ?? prisma.venue.create({ data: v })
+            })
         )
         console.log(`   ✓ ${venues.length} venues created\n`)
 
@@ -418,10 +420,15 @@ async function main() {
         console.log('📤 Seeding Activity Submissions...')
         const submissions = await Promise.all(
             participants.slice(0, 8).flatMap((participant, pIdx) =>
-                activities.slice(5, 10).map((activity, aIdx) =>
-                    prisma.activitySubmission.upsert({
-                        where: { participantId_activityId: { participantId: participant.id, activityId: activity.id } },
-                        create: {
+                activities.slice(5, 10).map(async (activity, aIdx) => {
+                    const existing = await prisma.activitySubmission.findFirst({
+                        where: { participantId: participant.id, activityId: activity.id },
+                    })
+
+                    if (existing) return existing
+
+                    return prisma.activitySubmission.create({
+                        data: {
                             participantId: participant.id,
                             activityId: activity.id,
                             submissionLink: `https://example.com/submit-${pIdx}-${aIdx}`,
@@ -432,9 +439,8 @@ async function main() {
                             reviewedAt: new Date(),
                             reviewNote: 'Great work!',
                         },
-                        update: {},
                     })
-                )
+                })
             )
         )
         console.log(`   ✓ ${submissions.length} activity submissions created\n`)

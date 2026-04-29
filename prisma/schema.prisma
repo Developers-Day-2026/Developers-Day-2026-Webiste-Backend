@@ -25,7 +25,6 @@ model User {
   staffProfile                 StaffProfile?
   actionsGrantedByMe           UserAction[]            @relation("ActionGrantedBy")
   grantedActions               UserAction[]            @relation("UserGrantedActions")
-  prQueries                    PrQuery[]
 
   @@index([email])
   @@index([type])
@@ -51,7 +50,6 @@ model Participant {
   scores                 Score[]
   user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   teamMembers            TeamMember[]
-  prQueries              PrQuery[]
 
   @@index([cnic])
   @@index([email])
@@ -226,6 +224,7 @@ model Competition {
   startTime            DateTime
   endTime              DateTime
   isActive             Boolean   @default(true)
+  isLaptopRequired     Boolean   @default(false)
   registrationDeadline DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -422,54 +421,6 @@ model UserAction {
   @@index([userId])
 }
 
-/// A query logged by a PR member on behalf of a participant requesting a competition change.
-model PrQuery {
-  id               String                @id @default(uuid())
-  participantName  String                @db.VarChar(100)
-  participantEmail String                @db.VarChar(255)
-  rollNumber       String?               @db.VarChar(20)
-  participantId    String?
-  competitionName  String                @db.VarChar(100)
-  message          String
-  status           PrQueryStatus         @default(PENDING)
-  resolvedNote     String?
-  createdByUserId  String
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  createdBy        User                  @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
-  participant      Participant?          @relation(fields: [participantId], references: [id], onDelete: SetNull)
-  emailQueue       PrQueryEmailQueue[]
-
-  @@index([status])
-  @@index([createdByUserId])
-  @@index([participantId])
-}
-
-/// Email queue entry created whenever a PR query status changes to APPROVED or REJECTED.
-/// A future email worker will read rows where isSent = false, send the email, and flip isSent = true.
-model PrQueryEmailQueue {
-  id               String        @id @default(uuid())
-  prQueryId        String
-  /// APPROVED | REJECTED — drives which email template the worker uses
-  emailType        String        @db.VarChar(20)
-  toEmail          String        @db.VarChar(255)
-  subject          String        @db.VarChar(300)
-  htmlBody         String
-  participantName  String        @db.VarChar(100)
-  competitionName  String        @db.VarChar(100)
-  resolvedNote     String?
-  isSent           Boolean       @default(false)
-  sentAt           DateTime?
-  retryCount       Int           @default(0)
-  failedReason     String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @default(now())
-  prQuery          PrQuery       @relation(fields: [prQueryId], references: [id], onDelete: Cascade)
-
-  @@index([isSent])
-  @@index([prQueryId])
-}
-
 model Minigame {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name        String   @unique
@@ -526,6 +477,9 @@ enum RegistrationStatus {
   VERIFIED
   FREE
   ONHOLD
+  WITHDRAWN
+  DISSOLVED
+  REFUNDED 
   REJECTED
 }
 
@@ -587,11 +541,4 @@ enum Action {
   UPDATE_PARTICIPANT_RECORD
   VIEW_AMBASSADOR_DASHBOARD
   MANAGE_AMBASSADORS
-  MANAGE_PR_QUERIES
-}
-
-enum PrQueryStatus {
-  PENDING
-  APPROVED
-  REJECTED
 }
